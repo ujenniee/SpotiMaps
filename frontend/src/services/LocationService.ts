@@ -24,3 +24,30 @@ export async function requestLocationPermission(): Promise<LocationPermission> {
     return 'denied';
   }
 }
+export type GPSReading = {
+  latitude: number;
+  longitude: number;
+  timestamp: number;
+};
+export async function getCurrentLocation(): Promise<GPSReading | null> {
+  const permission = await getLocationPermission();
+
+  if (!permission.granted) {
+    return null;
+  }
+
+  try {
+    const position = await Location.getCurrentPositionAsync({
+      accuracy: Location.Accuracy.High,
+    });
+
+    return {
+      latitude: position.coords.latitude,
+      longitude: position.coords.longitude,
+      timestamp: position.timestamp,
+    };
+  } catch (error) {
+    console.error('Failed to get GPS location:', error);
+    return null;
+  }
+}
