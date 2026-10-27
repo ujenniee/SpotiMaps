@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import {
+    ActivityIndicator,
     Image,
     Keyboard,
     KeyboardAvoidingView,
@@ -12,6 +13,7 @@ import {
     View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { signInWithEmail, signUpWithEmail } from '../services/SpotifyAuthService';
 import { colors } from '../theme';
 
 type Props = {
@@ -20,11 +22,40 @@ type Props = {
 
 type Mode = 'signup' | 'login';
 
-
 export default function LoginScreen({ onLogin }: Props) {
     const [mode, setMode] = useState<Mode>('signup');
-    const [username, setUsername] = useState('');
+    const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [errorMessage, setErrorMessage] = useState('');
+
+    async function handleSubmit() {
+        if (!email.trim() || !password.trim()) {
+            setErrorMessage('Email and password are required.');
+            return;
+        }
+
+        setIsSubmitting(true);
+        setErrorMessage('');
+
+        try {
+            const result = mode === 'signup'
+                ? await signUpWithEmail(email, password)
+                : await signInWithEmail(email, password);
+
+            if (!result.ok) {
+                setErrorMessage(result.error ?? 'Authentication failed.');
+                return;
+            }
+
+            onLogin();
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Something went wrong.';
+            setErrorMessage(message);
+        } finally {
+            setIsSubmitting(false);
+        }
+    }
 
     return (
         <SafeAreaView style={styles.safeArea}>
@@ -57,17 +88,18 @@ export default function LoginScreen({ onLogin }: Props) {
                                 </Pressable>
                             </View>
 
-                            <Text style={styles.label}>Username or email</Text>
+                            <Text style={styles.label}>Email</Text>
                             <TextInput
                                 style={styles.input}
-                                value={username}
-                                onChangeText={setUsername}
-                                placeholder="username or email"
+                                value={email}
+                                onChangeText={setEmail}
+                                placeholder="email"
                                 placeholderTextColor={colors.textMuted}
                                 autoCapitalize="none"
                                 autoCorrect={false}
                                 keyboardType="email-address"
                                 returnKeyType="next"
+                                editable={!isSubmitting}
                             />
 
                             <Text style={styles.label}>Password</Text>
@@ -80,14 +112,28 @@ export default function LoginScreen({ onLogin }: Props) {
                                 secureTextEntry
                                 autoCapitalize="none"
                                 returnKeyType="done"
+                                editable={!isSubmitting}
                             />
+
+                            {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
                         </View>
 
                         <Pressable
-                            style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
-                            onPress={onLogin}
+                            style={({ pressed }) => [
+                                styles.button,
+                                (pressed || isSubmitting) && styles.buttonPressed,
+                                isSubmitting && styles.buttonDisabled,
+                            ]}
+                            onPress={handleSubmit}
+                            disabled={isSubmitting}
                         >
-                            <Text style={styles.buttonText}>Connect to Spotify</Text>
+                            {isSubmitting ? (
+                                <ActivityIndicator size="small" color={colors.text} />
+                            ) : (
+                                <Text style={styles.buttonText}>
+                                    {mode === 'signup' ? 'Create account' : 'Connect to Spotify'}
+                                </Text>
+                            )}
                         </Pressable>
                     </View>
                 </TouchableWithoutFeedback>
@@ -157,6 +203,11 @@ const styles = StyleSheet.create({
         fontSize: 15,
         color: colors.text,
     },
+    errorText: {
+        color: colors.error,
+        fontSize: 13,
+        marginTop: 10,
+    },
     button: {
         alignSelf: 'center',
         backgroundColor: colors.spotifyGreen,
@@ -165,9 +216,14 @@ const styles = StyleSheet.create({
         borderRadius: 999,
         marginBottom: 60,
         marginTop: -30,
+        minWidth: 220,
+        alignItems: 'center',
     },
     buttonPressed: {
         opacity: 0.7,
+    },
+    buttonDisabled: {
+        opacity: 0.8,
     },
     buttonText: {
         fontSize: 18,
