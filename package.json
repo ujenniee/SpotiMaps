@@ -1,5 +1,11 @@
 {
   "devDependencies": {
     "supabase": "^2.121.0"
+  },
+  "scripts": {
+    "test": "jest"
+  },
+  "jest": {
+    "preset": "jest-expo"
   }
 }
