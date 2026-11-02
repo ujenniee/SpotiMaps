@@ -13,7 +13,7 @@ import {
     View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { signInWithEmail, signUpWithEmail } from '../services/SpotifyAuthService';
+import { signInWithEmail, signUpWithEmail } from '../services/SupabaseAuthService';
 import { colors } from '../theme';
 
 type Props = {
@@ -28,15 +28,18 @@ export default function LoginScreen({ onLogin }: Props) {
     const [password, setPassword] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [errorMessage, setErrorMessage] = useState('');
+    const [statusMessage, setStatusMessage] = useState('');
 
     async function handleSubmit() {
-        if (!email.trim() || !password.trim()) {
+        if (!email.trim() || password.length === 0) {
             setErrorMessage('Email and password are required.');
+            setStatusMessage('');
             return;
         }
 
         setIsSubmitting(true);
         setErrorMessage('');
+        setStatusMessage('');
 
         try {
             const result = mode === 'signup'
@@ -44,7 +47,12 @@ export default function LoginScreen({ onLogin }: Props) {
                 : await signInWithEmail(email, password);
 
             if (!result.ok) {
-                setErrorMessage(result.error ?? 'Authentication failed.');
+                setErrorMessage(result.error);
+                return;
+            }
+
+            if (!result.authenticated) {
+                setStatusMessage('Check your email to confirm your account, then log in.');
                 return;
             }
 
@@ -75,13 +83,27 @@ export default function LoginScreen({ onLogin }: Props) {
 
                         <View>
                             <View style={styles.modeRow}>
-                                <Pressable onPress={() => setMode('signup')} hitSlop={8}>
+                                <Pressable
+                                    onPress={() => {
+                                        setMode('signup');
+                                        setErrorMessage('');
+                                        setStatusMessage('');
+                                    }}
+                                    hitSlop={8}
+                                >
                                     <Text style={[styles.modeText, mode === 'signup' && styles.modeTextActive]}>
                                         Sign up
                                     </Text>
                                 </Pressable>
                                 <Text style={styles.modeDivider}>|</Text>
-                                <Pressable onPress={() => setMode('login')} hitSlop={8}>
+                                <Pressable
+                                    onPress={() => {
+                                        setMode('login');
+                                        setErrorMessage('');
+                                        setStatusMessage('');
+                                    }}
+                                    hitSlop={8}
+                                >
                                     <Text style={[styles.modeText, mode === 'login' && styles.modeTextActive]}>
                                         Login
                                     </Text>
@@ -116,6 +138,7 @@ export default function LoginScreen({ onLogin }: Props) {
                             />
 
                             {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
+                            {statusMessage ? <Text style={styles.statusText}>{statusMessage}</Text> : null}
                         </View>
 
                         <Pressable
@@ -131,7 +154,7 @@ export default function LoginScreen({ onLogin }: Props) {
                                 <ActivityIndicator size="small" color={colors.text} />
                             ) : (
                                 <Text style={styles.buttonText}>
-                                    {mode === 'signup' ? 'Create account' : 'Connect to Spotify'}
+                                    {mode === 'signup' ? 'Create account' : 'Log in'}
                                 </Text>
                             )}
                         </Pressable>
@@ -205,6 +228,11 @@ const styles = StyleSheet.create({
     },
     errorText: {
         color: colors.error,
+        fontSize: 13,
+        marginTop: 10,
+    },
+    statusText: {
+        color: colors.spotifyGreen,
         fontSize: 13,
         marginTop: 10,
     },

@@ -1,49 +1,54 @@
 import { supabase } from '../lib/supabase';
 
-export type AuthResult = {
-  ok: boolean;
-  user?: unknown | null;
-  error?: string;
-};
+export type AuthResult =
+  | { ok: true; authenticated: true }
+  | { ok: true; authenticated: false }
+  | { ok: false; error: string };
 
 export async function signUpWithEmail(email: string, password: string): Promise<AuthResult> {
   const trimmedEmail = email.trim();
-  const trimmedPassword = password.trim();
 
-  if (!trimmedEmail || !trimmedPassword) {
+  if (!trimmedEmail || password.length === 0) {
     return { ok: false, error: 'Email and password are required.' };
   }
 
   const { data, error } = await supabase.auth.signUp({
     email: trimmedEmail,
-    password: trimmedPassword,
+    password,
   });
 
   if (error) {
     return { ok: false, error: error.message };
   }
 
-  return { ok: true, user: data.user };
+  if (!data.user) {
+    return { ok: false, error: 'Sign up did not return a user. Please try again.' };
+  }
+
+  return { ok: true, authenticated: data.session !== null };
 }
 
 export async function signInWithEmail(email: string, password: string): Promise<AuthResult> {
   const trimmedEmail = email.trim();
-  const trimmedPassword = password.trim();
 
-  if (!trimmedEmail || !trimmedPassword) {
+  if (!trimmedEmail || password.length === 0) {
     return { ok: false, error: 'Email and password are required.' };
   }
 
   const { data, error } = await supabase.auth.signInWithPassword({
     email: trimmedEmail,
-    password: trimmedPassword,
+    password,
   });
 
   if (error) {
     return { ok: false, error: error.message };
   }
 
-  return { ok: true, user: data.user };
+  if (!data.user || !data.session) {
+    return { ok: false, error: 'Login did not create an active session. Please try again.' };
+  }
+
+  return { ok: true, authenticated: true };
 }
 
 export async function signOutSupabase(): Promise<void> {

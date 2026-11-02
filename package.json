@@ -1,11 +1,6 @@
 {
   "devDependencies": {
+    "@testing-library/react-native": "^14.1.0",
     "supabase": "^2.121.0"
-  },
-  "scripts": {
-    "test": "jest"
-  },
-  "jest": {
-    "preset": "jest-expo"
   }
 }

@@ -2,7 +2,7 @@ export type UserProfile = {
   id: string;
   email: string | null;
   username: string | null;
-  created_at: string | null;
+  created_at: string;
 };
 
 export type ListeningEvent = {
@@ -29,6 +29,19 @@ export type ListeningHistoryInsert = Pick<
 export type Database = {
   public: {
     Tables: {
+      profiles: {
+        Row: UserProfile;
+        Insert: {
+          id: string;
+          email?: string | null;
+          username?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          username?: string | null;
+        };
+        Relationships: [];
+      };
       listening_history: {
         Row: ListeningEvent;
         Insert: ListeningHistoryInsert;
