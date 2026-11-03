@@ -25,10 +25,30 @@ export type ListeningHistoryInsert = Pick<
   'user_id' | 'track_id' | 'title' | 'artist' | 'duration_ms' | 'spotify_url' | 'listened_at'
 >;
 
+export type StoredLocationSample = {
+  id: string;
+  user_id: string;
+  latitude: number;
+  longitude: number;
+  recorded_at: string;
+  created_at: string;
+};
+
+export type LocationSampleInsert = Pick<
+  StoredLocationSample,
+  'user_id' | 'latitude' | 'longitude' | 'recorded_at'
+>;
+
 // Only tables defined in committed migrations are included in the client schema.
 export type Database = {
   public: {
     Tables: {
+      location_samples: {
+        Row: StoredLocationSample;
+        Insert: LocationSampleInsert;
+        Update: Partial<LocationSampleInsert>;
+        Relationships: [];
+      };
       profiles: {
         Row: UserProfile;
         Insert: {
