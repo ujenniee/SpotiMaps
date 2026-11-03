@@ -106,6 +106,32 @@ export default function App() {
 
   const goToLocation = useCallback(() => setStep('location'), []);
   const goToApp = useCallback(() => setStep('app'), []);
+  useEffect(() => {
+    if (step !== 'app') return;
+  
+    const startAutomaticTracking = async () => {
+      const alreadyTracking = await isBackgroundTracking();
+  
+      if (alreadyTracking) {
+        setIsTracking(true);
+        return;
+      }
+  
+      const started = await startBackgroundTracking();
+  
+      setIsTracking(started);
+  
+      if (started) {
+        setGpsMessage('Automatic GPS tracking is active.');
+      } else {
+        setGpsMessage(
+          'Automatic tracking could not start. Check location permissions.'
+        );
+      }
+    };
+  
+    void startAutomaticTracking();
+  }, [step]);
 
   if (isCheckingSession) {
     return (
