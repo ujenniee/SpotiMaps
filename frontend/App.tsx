@@ -5,7 +5,14 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import LoginScreen from './src/screens/LoginScreen';
 import LocationPermissionScreen from './src/screens/LocationPermissionScreen';
-import { getCurrentLocation, type GPSReading } from './src/services/LocationService';
+import {
+  getCurrentLocation,
+  startBackgroundTracking,
+  stopBackgroundTracking,
+  isBackgroundTracking,
+  type GPSReading,
+} from './src/services/LocationService';
+
 import { getSupabaseSession } from './src/services/SupabaseAuthService';
 
 // Which screen to show: login first, then location, then the app
@@ -16,6 +23,37 @@ export default function App() {
 
   const [gpsReading, setGpsReading] = useState<GPSReading | null>(null);
   const [gpsMessage, setGpsMessage] = useState('');
+  const [isTracking, setIsTracking] = useState(false);
+  const [readingCount, setReadingCount] = useState<number | null>(null);
+  useEffect(() => {
+    const checkTracking = async () => {
+      const tracking = await isBackgroundTracking();
+      setIsTracking(tracking);
+    };
+  
+    void checkTracking();
+  }, []);
+  const handleStartTracking = async () => {
+    const started = await startBackgroundTracking();
+  
+    if (started) {
+      setIsTracking(true);
+      setReadingCount(null);
+      setGpsMessage('Tracking GPS locations in the background...');
+    } else {
+      setGpsMessage('Could not start background tracking. Check location permissions.');
+    }
+  };
+  
+  const handleStopTracking = async () => {
+    const readings = await stopBackgroundTracking();
+  
+    console.log('GPS readings:', readings);
+  
+    setIsTracking(false);
+    setReadingCount(readings.length);
+    setGpsMessage('GPS tracking stopped.');
+  };
 
   const testGPS = async () => {
     setGpsMessage('Getting GPS location...');
@@ -98,6 +136,21 @@ export default function App() {
 >
           <Text>You made it into the app!</Text>
           <Button title="Test GPS" onPress={testGPS} />
+          <Button
+          title="Start Tracking"
+          onPress={handleStartTracking}
+          disabled={isTracking}
+        />
+
+        <Button
+          title="Stop Tracking"
+          onPress={handleStopTracking}
+          disabled={!isTracking}
+        />
+
+        {readingCount !== null && (
+          <Text>GPS readings collected: {readingCount}</Text>
+        )}
 
           <Text>{gpsMessage}</Text>
 
