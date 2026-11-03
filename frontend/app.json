@@ -20,6 +20,16 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "isIosBackgroundLocationEnabled": true,
+          "locationWhenInUsePermission": "SpotiMaps uses your location to record where you listen to music.",
+          "locationAlwaysAndWhenInUsePermission": "SpotiMaps uses your location to record your music journey even when the app is in the background."
+        }
+      ]
+    ]
   }
 }
