@@ -9,10 +9,8 @@ type Props = {
   onDone: () => void;
 };
 
-// Explains why SpotiMaps needs location, then lets the user allow or deny it.
 export default function LocationPermissionScreen({ onDone }: Props) {
   const [isAsking, setIsAsking] = useState(false);
-  // true when iOS won't show the popup again and the user must use Settings
   const [isBlocked, setIsBlocked] = useState(false);
 
   const checkPermission = useCallback(async () => {
@@ -24,7 +22,6 @@ export default function LocationPermissionScreen({ onDone }: Props) {
     }
   }, [onDone]);
 
-  // Check when the screen opens, and again when the user comes back from Settings
   useEffect(() => {
     checkPermission();
     const subscription = AppState.addEventListener('change', (state) => {
@@ -78,7 +75,6 @@ export default function LocationPermissionScreen({ onDone }: Props) {
           </Text>
         </Pressable>
 
-        {/* Skipping is allowed: no location data is collected without permission */}
         <Pressable style={styles.secondaryButton} onPress={onDone} hitSlop={8}>
           <Text style={styles.secondaryButtonText}>
             {isBlocked ? 'Continue without location' : 'Not now'}
