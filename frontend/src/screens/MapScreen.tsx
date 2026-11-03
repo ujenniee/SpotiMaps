@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
-import { LayoutAnimation, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, LayoutAnimation, Pressable, StyleSheet, Text, View } from 'react-native';
 import MapView, { Marker, type Region } from 'react-native-maps';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import ActionButton from '../components/ActionButton';
 import { colors, genreColors, getGenreColor } from '../theme';
-import { mockPlaces, type MapPlace } from '../data/mockData';
+import type { MapPlace } from '../data/mockData';
 import { fetchMapPlaces } from '../services/MapDataService';
 import { getTopGenre, getTotalPlays } from '../utils/placeStats';
 import SongCardScreen from './SongCardScreen';
@@ -16,11 +17,15 @@ const UW_REGION: Region = {
   longitudeDelta: 0.012,
 };
 
+type LoadState = 'loading' | 'ok' | 'empty' | 'error';
+
 export default function MapScreen() {
   const mapRef = useRef<MapView>(null);
   const regionRef = useRef<Region>(UW_REGION);
-  const [places, setPlaces] = useState<MapPlace[]>(mockPlaces);
-  const [selectedPlace, setSelectedPlace] = useState<MapPlace | null>(mockPlaces[0] ?? null);
+  const isMountedRef = useRef(true);
+  const [loadState, setLoadState] = useState<LoadState>('loading');
+  const [places, setPlaces] = useState<MapPlace[]>([]);
+  const [selectedPlace, setSelectedPlace] = useState<MapPlace | null>(null);
   const [isCardExpanded, setIsCardExpanded] = useState(true);
 
   // Makes the card slide smoothly instead of jumping
@@ -28,26 +33,32 @@ export default function MapScreen() {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
   };
 
-  useEffect(() => {
-    let isMounted = true;
+  const loadPlaces = useCallback(async () => {
+    setLoadState('loading');
+    const result = await fetchMapPlaces();
 
-    async function loadPlaces() {
-      const nextPlaces = await fetchMapPlaces();
-
-      if (!isMounted) {
-        return;
-      }
-
-      setPlaces(nextPlaces);
-      setSelectedPlace((current) => current ?? nextPlaces[0] ?? null);
+    if (!isMountedRef.current) {
+      return;
     }
 
+    if (result.status === 'ok') {
+      setPlaces(result.places);
+      setLoadState('ok');
+    } else {
+      setPlaces([]);
+      setSelectedPlace(null);
+      setLoadState(result.status);
+    }
+  }, []);
+
+  useEffect(() => {
+    isMountedRef.current = true;
     void loadPlaces();
 
     return () => {
-      isMounted = false;
+      isMountedRef.current = false;
     };
-  }, []);
+  }, [loadPlaces]);
 
   const zoom = (factor: number) => {
     const region = regionRef.current;
@@ -72,6 +83,7 @@ export default function MapScreen() {
           regionRef.current = region;
         }}
       >
+        {/* Only real places from Supabase are shown, never fake data */}
         {places.map((place) => (
           <Marker
             key={place.id}
@@ -110,8 +122,37 @@ export default function MapScreen() {
         </View>
       </SafeAreaView>
 
-      {selectedPlace ? (
-        <View style={styles.bottomSheet}>
+      <View style={styles.bottomSheet} pointerEvents="box-none">
+        {loadState === 'loading' && (
+          <View style={styles.loadingPill}>
+            <ActivityIndicator color={colors.text} />
+            <Text style={styles.loadingText}>Loading your map…</Text>
+          </View>
+        )}
+
+        {loadState === 'empty' && (
+          <View style={styles.statusCard}>
+            <Text style={styles.statusTitle}>Keep listening to build your map!</Text>
+            <Text style={styles.statusBody}>
+              Once your Spotify is connected and you listen to music with location turned on,
+              the places you listen will show up here.
+            </Text>
+          </View>
+        )}
+
+        {loadState === 'error' && (
+          <View style={styles.statusCard}>
+            <Text style={styles.statusTitle}>Couldn’t load your map</Text>
+            <Text style={styles.statusBody}>
+              Something went wrong loading your listening history. Please try again.
+            </Text>
+            <View style={styles.retryButton}>
+              <ActionButton label="Try again" onPress={loadPlaces} />
+            </View>
+          </View>
+        )}
+
+        {loadState === 'ok' && selectedPlace && (
           <SongCardScreen
             place={selectedPlace}
             isExpanded={isCardExpanded}
@@ -124,8 +165,8 @@ export default function MapScreen() {
               setSelectedPlace(null);
             }}
           />
-        </View>
-      ) : null}
+        )}
+      </View>
     </View>
   );
 }
@@ -206,5 +247,43 @@ const styles = StyleSheet.create({
     left: 12,
     right: 12,
     bottom: 12,
+  },
+  loadingPill: {
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.white,
+    borderRadius: 999,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  loadingText: {
+    fontSize: 14,
+    color: colors.text,
+  },
+  statusCard: {
+    backgroundColor: colors.white,
+    borderRadius: 18,
+    padding: 18,
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
+  },
+  statusTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  statusBody: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: colors.textMuted,
+    marginTop: 6,
+  },
+  retryButton: {
+    marginTop: 14,
   },
 });

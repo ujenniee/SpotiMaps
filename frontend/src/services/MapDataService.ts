@@ -1,5 +1,10 @@
 import { supabase } from '../lib/supabase';
-import { mockPlaces, type MapPlace, type Song } from '../data/mockData';
+import type { MapPlace, Song } from '../data/mockData';
+
+export type MapPlacesResult =
+  | { status: 'ok'; places: MapPlace[] }
+  | { status: 'empty' }
+  | { status: 'error'; message: string };
 
 function normalizeGenre(value: unknown): string | null {
   if (typeof value !== 'string') {
@@ -45,12 +50,23 @@ function aggregateSongs(rows: Array<Record<string, unknown>>): Song[] {
   return [...totals.values()].map((entry) => entry.song).sort((a, b) => b.plays - a.plays);
 }
 
-export async function fetchMapPlaces(): Promise<MapPlace[]> {
+export async function fetchMapPlaces(): Promise<MapPlacesResult> {
   try {
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (!sessionData.session) {
+      return { status: 'empty' };
+    }
+
     const { data, error } = await supabase.from('listening_history').select('*').limit(200);
 
-    if (error || !data || data.length === 0) {
-      return mockPlaces;
+    if (error) {
+      console.warn('fetchMapPlaces Supabase error:', error.message);
+      return { status: 'error', message: error.message };
+    }
+
+    // No plays yet (for example, Spotify isn't connected yet)
+    if (!data || data.length === 0) {
+      return { status: 'empty' };
     }
 
     const grouped = new Map<string, { place: MapPlace; rows: Record<string, unknown>[] }>();
@@ -89,8 +105,10 @@ export async function fetchMapPlaces(): Promise<MapPlace[]> {
       songs: aggregateSongs(rows),
     }));
 
-    return places.length > 0 ? places : mockPlaces;
-  } catch {
-    return mockPlaces;
+    return places.length > 0 ? { status: 'ok', places } : { status: 'empty' };
+  } catch (error) {
+    console.warn('fetchMapPlaces crashed:', error);
+    const message = error instanceof Error ? error.message : 'Something went wrong.';
+    return { status: 'error', message };
   }
 }
