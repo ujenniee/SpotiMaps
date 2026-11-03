@@ -9,7 +9,13 @@ jest.mock('expo-location', () => ({
   getForegroundPermissionsAsync: jest.fn(),
   watchPositionAsync: jest.fn(),
 }));
+jest.mock('@react-native-async-storage/async-storage', () =>
+    require('@react-native-async-storage/async-storage/jest/async-storage-mock')
+  );
 
+jest.mock('expo-task-manager', () => ({
+defineTask: jest.fn(),
+}));
 const mockPermissions = jest.mocked(Location.getForegroundPermissionsAsync);
 const mockWatchPosition = jest.mocked(Location.watchPositionAsync);
 
