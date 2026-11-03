@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { AppState, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { AppState, Linking, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import ActionButton from '../components/ActionButton';
 import { colors } from '../theme';
 import { getLocationPermission, requestLocationPermission } from '../services/LocationService';
 
@@ -65,21 +66,18 @@ export default function LocationPermissionScreen({ onDone }: Props) {
       </View>
 
       <View style={styles.actions}>
-        <Pressable
-          style={({ pressed }) => [styles.primaryButton, (pressed || isAsking) && styles.pressed]}
+        <ActionButton
+          label={isBlocked ? 'Open Settings' : 'Allow location'}
           onPress={isBlocked ? handleOpenSettings : handleAllow}
+          loading={isAsking}
           disabled={isAsking}
-        >
-          <Text style={styles.primaryButtonText}>
-            {isBlocked ? 'Open Settings' : 'Allow location'}
-          </Text>
-        </Pressable>
+        />
 
-        <Pressable style={styles.secondaryButton} onPress={onDone} hitSlop={8}>
-          <Text style={styles.secondaryButtonText}>
-            {isBlocked ? 'Continue without location' : 'Not now'}
-          </Text>
-        </Pressable>
+        <ActionButton
+          label={isBlocked ? 'Continue without location' : 'Not now'}
+          onPress={onDone}
+          variant="secondary"
+        />
       </View>
     </SafeAreaView>
   );
@@ -123,27 +121,5 @@ const styles = StyleSheet.create({
   actions: {
     alignItems: 'center',
     marginBottom: 40,
-  },
-  primaryButton: {
-    backgroundColor: colors.spotifyGreen,
-    paddingVertical: 16,
-    paddingHorizontal: 40,
-    borderRadius: 999,
-  },
-  pressed: {
-    opacity: 0.7,
-  },
-  primaryButtonText: {
-    fontSize: 18,
-    color: colors.text,
-  },
-  secondaryButton: {
-    marginTop: 16,
-    padding: 8,
-  },
-  secondaryButtonText: {
-    fontSize: 16,
-    color: colors.textMuted,
-    textDecorationLine: 'underline',
   },
 });
