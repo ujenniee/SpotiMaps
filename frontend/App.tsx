@@ -34,7 +34,6 @@ const TAB_ICONS: Record<string, IconName> = {
 
 type Step = 'login' | 'location' | 'app';
 
-// Temporary tab that keeps the team's GPS test button available
 function GpsTestScreen() {
   const [gpsReading, setGpsReading] = useState<GPSReading | null>(null);
   const [gpsMessage, setGpsMessage] = useState('');
