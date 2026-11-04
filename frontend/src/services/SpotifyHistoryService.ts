@@ -105,5 +105,27 @@ export async function syncListeningHistory(
     }
     insertedCount = data?.length ?? 0;
   }
-  return { fetchedCount: plays.length, insertedCount, skippedCount };
+  // Also match previously saved plays: GPS may have arrived since the last sync.
+  // Separate old batches so each request stays below the database's 7-day limit.
+  const timestamps = [...new Set(plays.map((play) => Date.parse(play.listened_at)))].sort((a, b) => a - b);
+  let matchingError: string | null = null;
+  try {
+    for (let first = 0; first < timestamps.length;) {
+      let last = first;
+      while (last + 1 < timestamps.length
+        && timestamps[last + 1] - timestamps[first] < 6 * 24 * 60 * 60 * 1000) last++;
+      const { data, error } = await client.rpc('match_listening_locations', {
+        p_from: new Date(timestamps[first]).toISOString(),
+        p_to: new Date(timestamps[last] + 1).toISOString(),
+        p_max_gap_seconds: 60,
+      });
+      if (error) throw new Error(error.message);
+      if (!data || data.length !== 1) throw new Error('Matching did not return a result.');
+      first = last + 1;
+    }
+  } catch (error) {
+    // Saving succeeded; retrying sync is safe and will request matching again.
+    matchingError = error instanceof Error ? error.message : 'Could not request song-location matching.';
+  }
+  return { fetchedCount: plays.length, insertedCount, skippedCount, matchingError };
 }
