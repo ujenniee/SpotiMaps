@@ -12,11 +12,14 @@ import {
   isBackgroundTracking,
   type GPSReading,
 } from './src/services/LocationService';
+import SpotifyConnectScreen from './src/screens/SpotifyConnectScreen';
+import Constants from 'expo-constants';
+
 
 import { getSupabaseSession } from './src/services/SupabaseAuthService';
 
 // Which screen to show: login first, then location, then the app
-type Step = 'login' | 'location' | 'app';
+type Step = 'login' | 'spotify' | 'location' | 'app';
 
 export default function App() {
   const [step, setStep] = useState<Step>('login');
@@ -34,6 +37,13 @@ export default function App() {
     void checkTracking();
   }, []);
   const handleStartTracking = async () => {
+    if (Constants.appOwnership === 'expo') {
+
+      setGpsMessage('Background GPS tracking requires a development build.');
+  
+      return;
+  
+    }
     const started = await startBackgroundTracking();
   
     if (started) {
@@ -83,7 +93,7 @@ export default function App() {
           return;
         }
 
-        setStep(session ? 'location' : 'login');
+        setStep(session ? 'spotify' : 'login');
       } catch (error) {
         console.warn('Failed to restore Supabase session', error);
 
@@ -106,8 +116,9 @@ export default function App() {
 
   const goToLocation = useCallback(() => setStep('location'), []);
   const goToApp = useCallback(() => setStep('app'), []);
+  const goToSpotify = useCallback(() => setStep('spotify'), []);
   useEffect(() => {
-    if (step !== 'app') return;
+    if (step !== 'app' || Constants.appOwnership === 'expo') return;
   
     const startAutomaticTracking = async () => {
       const alreadyTracking = await isBackgroundTracking();
@@ -148,7 +159,11 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <StatusBar style="dark" />
-      {step === 'login' && <LoginScreen onLogin={goToLocation} />}
+      {step === 'login' && <LoginScreen onLogin={goToSpotify} />}
+
+      {step === 'spotify' && (
+        <SpotifyConnectScreen onConnected={goToLocation} />
+      )}
       {step === 'location' && <LocationPermissionScreen onDone={goToApp} />}
       {step === 'app' && (
         // Temporary: the tabs will go here later
