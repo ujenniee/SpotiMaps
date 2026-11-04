@@ -51,8 +51,18 @@ test('reports expired authorization, missing permissions, and rate limits', asyn
 
 test('stores plays for the signed-in user and ignores duplicates across syncs', async () => {
   const saved = new Map();
+  let matchingCalls = 0;
   const client = {
     auth: { getUser: async () => ({ data: { user: { id: 'user-a' } }, error: null }) },
+    rpc: async (name, args) => {
+      assert.equal(saved.size, 2, 'Matching must happen after saving');
+      assert.equal(name, 'match_listening_locations');
+      assert.deepEqual(args, {
+        p_from: '2026-10-26T14:00:00.000Z', p_to: '2026-10-26T14:05:00.001Z', p_max_gap_seconds: 60,
+      });
+      matchingCalls++;
+      return { data: [{}], error: null };
+    },
     from: (table) => ({
       upsert: (rows, options) => ({
         select: async () => {
@@ -75,10 +85,11 @@ test('stores plays for the signed-in user and ignores duplicates across syncs', 
   const repeatedListen = { ...item, played_at: '2026-10-26T14:05:00Z' };
   const fetcher = async () => reply([item, repeatedListen]);
   assert.deepEqual(await syncListeningHistory(client, 'token', fetcher), {
-    fetchedCount: 2, insertedCount: 2, skippedCount: 0,
+    fetchedCount: 2, insertedCount: 2, skippedCount: 0, matchingError: null,
   });
   assert.equal((await syncListeningHistory(client, 'token', fetcher)).insertedCount, 0);
   assert.equal(saved.size, 2);
+  assert.equal(matchingCalls, 2, 'Duplicate syncs must retry matching for late GPS');
 });
 
 test('requires Supabase login and reports database failures', async () => {
@@ -92,6 +103,33 @@ test('requires Supabase login and reports database failures', async () => {
 test('an empty Spotify history needs no database write', async () => {
   const client = { auth: { getUser: async () => ({ data: { user: { id: 'user-a' } }, error: null }) } };
   assert.deepEqual(await syncListeningHistory(client, 'token', async () => reply([])), {
-    fetchedCount: 0, insertedCount: 0, skippedCount: 0,
+    fetchedCount: 0, insertedCount: 0, skippedCount: 0, matchingError: null,
   });
+});
+
+test('keeps a successful Spotify upload when matching fails', async () => {
+  const client = {
+    auth: { getUser: async () => ({ data: { user: { id: 'user-a' } }, error: null }) },
+    from: () => ({ upsert: () => ({ select: async () => ({ data: [{ id: '1' }], error: null }) }) }),
+    rpc: async () => ({ data: null, error: { message: 'matching unavailable' } }),
+  };
+  const result = await syncListeningHistory(client, 'token', async () => reply([item]));
+  assert.equal(result.insertedCount, 1);
+  assert.equal(result.matchingError, 'matching unavailable');
+});
+
+test('matches old and recent plays in separate bounded requests', async () => {
+  const ranges = [];
+  const client = {
+    auth: { getUser: async () => ({ data: { user: { id: 'user-a' } }, error: null }) },
+    from: () => ({ upsert: () => ({ select: async () => ({ data: [], error: null }) }) }),
+    rpc: async (_name, args) => { ranges.push(args); return { data: [{}], error: null }; },
+  };
+  const recent = { ...item, played_at: '2026-11-03T14:00:00Z' };
+  await syncListeningHistory(client, 'token', async () => reply([recent, item]));
+  assert.equal(ranges.length, 2);
+  for (const range of ranges) {
+    assert.ok(Date.parse(range.p_to) > Date.parse(range.p_from));
+    assert.ok(Date.parse(range.p_to) - Date.parse(range.p_from) <= 7 * 86400000);
+  }
 });
