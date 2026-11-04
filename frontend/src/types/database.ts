@@ -16,6 +16,7 @@ export type ListeningEvent = {
   genre: string | null;
   latitude: number | null;
   longitude: number | null;
+  location_id: string | null;
   listened_at: string;
   created_at: string;
 };
@@ -38,6 +39,23 @@ export type LocationSampleInsert = Pick<
   StoredLocationSample,
   'user_id' | 'latitude' | 'longitude' | 'recorded_at'
 >;
+
+export type ListeningMatchResult = {
+  examined_count: number;
+  matched_count: number;
+  unmatched_count: number;
+  changed_count: number;
+};
+
+export type MatchedListeningEvent = Pick<
+  ListeningEvent,
+  'id' | 'track_id' | 'title' | 'artist' | 'duration_ms' | 'spotify_url' | 'genre'
+  | 'listened_at' | 'location_id' | 'latitude' | 'longitude'
+> & {
+  location_recorded_at: string | null;
+  time_gap_seconds: number | null;
+  match_status: 'matched' | 'unmatched';
+};
 
 // Only tables defined in committed migrations are included in the client schema.
 export type Database = {
@@ -66,11 +84,26 @@ export type Database = {
         Row: ListeningEvent;
         Insert: ListeningHistoryInsert;
         Update: Partial<ListeningHistoryInsert>;
-        Relationships: [];
+        Relationships: [{
+          foreignKeyName: 'listening_history_location_sample_fkey';
+          columns: ['user_id', 'location_id'];
+          isOneToOne: false;
+          referencedRelation: 'location_samples';
+          referencedColumns: ['user_id', 'id'];
+        }];
       };
     };
     Views: { [key: string]: never };
-    Functions: { [key: string]: never };
+    Functions: {
+      match_listening_locations: {
+        Args: { p_from: string; p_to: string; p_max_gap_seconds?: number };
+        Returns: ListeningMatchResult[];
+      };
+      get_matched_listening_history: {
+        Args: { p_from: string; p_to: string; p_limit?: number; p_offset?: number };
+        Returns: MatchedListeningEvent[];
+      };
+    };
     Enums: { [key: string]: never };
     CompositeTypes: { [key: string]: never };
   };

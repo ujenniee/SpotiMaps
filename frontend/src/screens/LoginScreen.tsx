@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import {
-    ActivityIndicator,
     Image,
     Keyboard,
     KeyboardAvoidingView,
@@ -13,6 +12,7 @@ import {
     View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import ActionButton from '../components/ActionButton';
 import { signInWithEmail, signUpWithEmail } from '../services/SupabaseAuthService';
 import { colors } from '../theme';
 
@@ -141,23 +141,12 @@ export default function LoginScreen({ onLogin }: Props) {
                             {statusMessage ? <Text style={styles.statusText}>{statusMessage}</Text> : null}
                         </View>
 
-                        <Pressable
-                            style={({ pressed }) => [
-                                styles.button,
-                                (pressed || isSubmitting) && styles.buttonPressed,
-                                isSubmitting && styles.buttonDisabled,
-                            ]}
+                        <ActionButton
+                            label={mode === 'signup' ? 'Create account' : 'Log in'}
                             onPress={handleSubmit}
+                            loading={isSubmitting}
                             disabled={isSubmitting}
-                        >
-                            {isSubmitting ? (
-                                <ActivityIndicator size="small" color={colors.text} />
-                            ) : (
-                                <Text style={styles.buttonText}>
-                                    {mode === 'signup' ? 'Create account' : 'Log in'}
-                                </Text>
-                            )}
-                        </Pressable>
+                        />
                     </View>
                 </TouchableWithoutFeedback>
             </KeyboardAvoidingView>
@@ -235,26 +224,5 @@ const styles = StyleSheet.create({
         color: colors.spotifyGreen,
         fontSize: 13,
         marginTop: 10,
-    },
-    button: {
-        alignSelf: 'center',
-        backgroundColor: colors.spotifyGreen,
-        paddingVertical: 16,
-        paddingHorizontal: 40,
-        borderRadius: 999,
-        marginBottom: 60,
-        marginTop: -30,
-        minWidth: 220,
-        alignItems: 'center',
-    },
-    buttonPressed: {
-        opacity: 0.7,
-    },
-    buttonDisabled: {
-        opacity: 0.8,
-    },
-    buttonText: {
-        fontSize: 18,
-        color: colors.text,
     },
 });
