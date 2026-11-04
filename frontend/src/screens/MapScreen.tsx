@@ -3,7 +3,8 @@ import { LayoutAnimation, Pressable, StyleSheet, Text, View } from 'react-native
 import MapView, { Marker, type Region } from 'react-native-maps';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, genreColors, getGenreColor } from '../theme';
-import { mockPlaces, type MapPlace } from '../data/mockData';
+import { supabase } from '../lib/supabase';
+import type { MapPlace } from '../data/mockData';
 import { fetchMapPlaces } from '../services/MapDataService';
 import { getTopGenre, getTotalPlays } from '../utils/placeStats';
 import SongCardScreen from './SongCardScreen';
@@ -19,9 +20,12 @@ const UW_REGION: Region = {
 export default function MapScreen() {
   const mapRef = useRef<MapView>(null);
   const regionRef = useRef<Region>(UW_REGION);
-  const [places, setPlaces] = useState<MapPlace[]>(mockPlaces);
-  const [selectedPlace, setSelectedPlace] = useState<MapPlace | null>(mockPlaces[0] ?? null);
+  const [places, setPlaces] = useState<MapPlace[]>([]);
+  const [selectedPlace, setSelectedPlace] = useState<MapPlace | null>(null);
   const [isCardExpanded, setIsCardExpanded] = useState(true);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [isMapReady, setIsMapReady] = useState(false);
 
   // Makes the card slide smoothly instead of jumping
   const animateCard = () => {
@@ -32,14 +36,21 @@ export default function MapScreen() {
     let isMounted = true;
 
     async function loadPlaces() {
-      const nextPlaces = await fetchMapPlaces();
-
-      if (!isMounted) {
-        return;
+      try {
+        const nextPlaces = await fetchMapPlaces(supabase);
+        if (isMounted) {
+          setPlaces(nextPlaces);
+          setSelectedPlace(nextPlaces[0] ?? null);
+        }
+      } catch (error) {
+        if (isMounted) {
+          setLoadError(error instanceof Error ? error.message : 'Could not load map data.');
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
       }
-
-      setPlaces(nextPlaces);
-      setSelectedPlace((current) => current ?? nextPlaces[0] ?? null);
     }
 
     void loadPlaces();
@@ -48,6 +59,35 @@ export default function MapScreen() {
       isMounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!isMapReady || isLoading || places.length === 0) {
+      return;
+    }
+
+    const coordinates = places.map(({ latitude, longitude }) => ({ latitude, longitude }));
+    const first = coordinates[0];
+    const allAtSameCoordinate = coordinates.every(
+      ({ latitude, longitude }) => latitude === first.latitude && longitude === first.longitude,
+    );
+
+    if (coordinates.length === 1 || allAtSameCoordinate) {
+      mapRef.current?.animateToRegion(
+        {
+          ...first,
+          latitudeDelta: 0.012,
+          longitudeDelta: 0.012,
+        },
+        350,
+      );
+      return;
+    }
+
+    mapRef.current?.fitToCoordinates(coordinates, {
+      edgePadding: { top: 120, right: 60, bottom: 320, left: 60 },
+      animated: true,
+    });
+  }, [isMapReady, isLoading, places]);
 
   const zoom = (factor: number) => {
     const region = regionRef.current;
@@ -67,6 +107,7 @@ export default function MapScreen() {
         ref={mapRef}
         style={StyleSheet.absoluteFill}
         initialRegion={UW_REGION}
+        onMapReady={() => setIsMapReady(true)}
         showsUserLocation
         onRegionChangeComplete={(region) => {
           regionRef.current = region;
@@ -109,6 +150,18 @@ export default function MapScreen() {
           </Pressable>
         </View>
       </SafeAreaView>
+
+      {isLoading || loadError || places.length === 0 ? (
+        <View style={styles.statusBanner} accessibilityRole="summary">
+          <Text style={styles.statusText}>
+            {isLoading
+              ? 'Loading your listening history…'
+              : loadError
+                ? loadError
+                : 'No matched listening data from the last 7 days. Save listening history and GPS samples to see places here.'}
+          </Text>
+        </View>
+      ) : null}
 
       {selectedPlace ? (
         <View style={styles.bottomSheet}>
@@ -206,5 +259,21 @@ const styles = StyleSheet.create({
     left: 12,
     right: 12,
     bottom: 12,
+  },
+  statusBanner: {
+    position: 'absolute',
+    top: 72,
+    left: 20,
+    right: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: colors.white,
+    elevation: 3,
+  },
+  statusText: {
+    color: colors.text,
+    fontSize: 13,
+    textAlign: 'center',
   },
 });

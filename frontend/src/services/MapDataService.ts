@@ -1,96 +1,94 @@
-import { supabase } from '../lib/supabase';
-import { mockPlaces, type MapPlace, type Song } from '../data/mockData';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import type { MapPlace, Song } from '../data/mockData';
+import type { Database, MatchedListeningEvent } from '../types/database';
+import { getMatchedListeningHistory } from './MatchedListeningHistoryService.ts';
+import { matchListeningLocations } from './ListeningMatchService.ts';
 
-function normalizeGenre(value: unknown): string | null {
-  if (typeof value !== 'string') {
-    return null;
-  }
+const HISTORY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const PAGE_SIZE = 500;
 
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
+function isValidCoordinate(value: number | null): value is number {
+  return value !== null && Number.isFinite(value);
 }
 
-function aggregateSongs(rows: Array<Record<string, unknown>>): Song[] {
-  const totals = new Map<string, { song: Song; key: string }>();
+function createSongs(rows: MatchedListeningEvent[]): Song[] {
+  const songs = new Map<string, Song>();
 
   rows.forEach((row) => {
-    const title = typeof row.title === 'string' ? row.title : '';
-    const artist = typeof row.artist === 'string' ? row.artist : 'Unknown artist';
-    const genre = normalizeGenre(row.genre);
-    const plays = Number(row.plays ?? row.listen_count ?? 1);
-
+    const title = row.title.trim();
     if (!title) {
       return;
     }
 
-    const key = `${title}|${artist}|${genre ?? 'unknown'}`;
-    const existing = totals.get(key);
+    const artist = row.artist || 'Unknown artist';
+    const genre = row.genre?.trim() || null;
+    const key = JSON.stringify([title, artist, genre]);
+    const existing = songs.get(key);
 
     if (existing) {
-      existing.song.plays += Number.isFinite(plays) ? plays : 1;
+      existing.plays += 1;
+    } else {
+      songs.set(key, { title, artist, genre, plays: 1 });
+    }
+  });
+
+  return [...songs.values()].sort((a, b) => b.plays - a.plays);
+}
+
+/** Load the signed-in user's matched plays from the most recent seven days. */
+export async function fetchMapPlaces(client: SupabaseClient<Database>): Promise<MapPlace[]> {
+  const to = new Date();
+  const from = new Date(to.getTime() - HISTORY_WINDOW_MS);
+  const range = { from: from.toISOString(), to: to.toISOString() };
+  const rows: MatchedListeningEvent[] = [];
+
+  await matchListeningLocations(client, range);
+
+  for (let offset = 0; ; offset += PAGE_SIZE) {
+    const page = await getMatchedListeningHistory(client, {
+      ...range,
+      limit: PAGE_SIZE,
+      offset,
+    });
+    rows.push(...page);
+    if (page.length < PAGE_SIZE) {
+      break;
+    }
+  }
+
+  const groups = new Map<string, {
+    latitude: number;
+    longitude: number;
+    rows: MatchedListeningEvent[];
+  }>();
+  rows.forEach((row) => {
+    if (row.match_status !== 'matched'
+      || !row.location_id
+      || !isValidCoordinate(row.latitude)
+      || !isValidCoordinate(row.longitude)) {
       return;
     }
 
-    totals.set(key, {
-      key,
-      song: {
-        title,
-        artist,
-        genre,
-        plays: Number.isFinite(plays) ? plays : 1,
-      },
-    });
-  });
-
-  return [...totals.values()].map((entry) => entry.song).sort((a, b) => b.plays - a.plays);
-}
-
-export async function fetchMapPlaces(): Promise<MapPlace[]> {
-  try {
-    const { data, error } = await supabase.from('listening_history').select('*').limit(200);
-
-    if (error || !data || data.length === 0) {
-      return mockPlaces;
-    }
-
-    const grouped = new Map<string, { place: MapPlace; rows: Record<string, unknown>[] }>();
-
-    data.forEach((row) => {
-      const latitude = Number(row.latitude);
-      const longitude = Number(row.longitude);
-
-      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
-        return;
-      }
-
-      const key = `${latitude.toFixed(5)}|${longitude.toFixed(5)}`;
-      const existing = grouped.get(key);
-
-      if (existing) {
-        existing.rows.push(row);
-        return;
-      }
-
-      grouped.set(key, {
-        place: {
-          id: key,
-          name: `Listening stop ${grouped.size + 1}`,
-          area: 'Supabase',
-          latitude,
-          longitude,
-          songs: [],
-        },
+    const group = groups.get(row.location_id);
+    if (group) {
+      group.rows.push(row);
+    } else {
+      groups.set(row.location_id, {
+        latitude: row.latitude,
+        longitude: row.longitude,
         rows: [row],
       });
-    });
+    }
+  });
 
-    const places = [...grouped.values()].map(({ place, rows }) => ({
-      ...place,
-      songs: aggregateSongs(rows),
-    }));
-
-    return places.length > 0 ? places : mockPlaces;
-  } catch {
-    return mockPlaces;
-  }
+  return [...groups.entries()].map(([locationId, group], index) => {
+    return {
+      id: locationId,
+      name: `Listening stop ${index + 1}`,
+      area: 'Recorded GPS location',
+      latitude: group.latitude,
+      longitude: group.longitude,
+      songs: createSongs(group.rows),
+    };
+  });
 }
