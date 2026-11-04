@@ -1,5 +1,4 @@
-// Hardcoded places and songs for the Map and Song Card.
-// Later this gets replaced with real matched data from Supabase.
+// Demo fixtures retained for non-map mock consumers. Map data comes from Supabase.
 
 export type Song = {
   title: string;
