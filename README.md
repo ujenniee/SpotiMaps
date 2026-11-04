@@ -10,12 +10,29 @@ where users listen to their favorite music.
 ## Project status
 
 The current app includes an Expo frontend, Supabase email/password
-authentication, database migrations for user profiles and listening history,
+authentication, and Spotify OAuth and account linking, database migrations for user profiles and listening history,
 and services for location and Spotify listening-history data. Some screens and
-flows are still prototypes or use mock data. Spotify OAuth and a complete
+flows are still prototypes or use mock data. Complete
 end-to-end flow from Spotify through location matching to the map are not yet
 available. See the [weekly reports](./reports/) for the team's latest progress
 and plans.
+Automatic retrieval of Spotify listening history and GPS-based
+song-location matching are still in development.
+
+## Operational Use Case
+
+### Viewing the Map
+
+**Status: Operational with Sample Data**
+
+1. The user opens SpotiMaps and logs in using Supabase authentication.
+2. The user connects their Spotify account through Spotify OAuth.
+3. The application links their Spotify account to their Supabase profile.
+4. The user grants location permissions.
+5. The user navigates to the Map tab.
+6. The map displays sample songs associated with different locations, allowing users to visualize their listening history.
+
+For the beta release, the map uses hardcoded song-location data to demonstrate the intended experience. Spotify authentication and account linking are fully functional.
 
 ## Repository structure
 
@@ -52,7 +69,8 @@ dependencies are in `frontend/package.json`.
 ## Configure Supabase
 
 The app uses one Supabase project for authentication and its PostgreSQL
-database; a separate database or custom API server is not required for the
+database. Email/password login is handled through Supabase Auth, while Spotify
+authentication is handled separately through Spotify OAuth; a separate database or custom API server is not required for the
 current login and listening-history flows.
 
 - Supabase Auth owns credentials and user identity in `auth.users`.
@@ -62,11 +80,13 @@ current login and listening-history flows.
   Row-level security restricts profile and play data to the signed-in user.
 - The Expo app connects with the project's URL and public anon key. Never put
   a service-role key in the app or commit it to the repository.
+  The app requires `EXPO_PUBLIC_SUPABASE_URL`,
+  `EXPO_PUBLIC_SUPABASE_ANON_KEY`, and `EXPO_PUBLIC_SPOTIFY_CLIENT_ID`.
 
-The app requires `EXPO_PUBLIC_SUPABASE_URL` and
-`EXPO_PUBLIC_SUPABASE_ANON_KEY`. There is currently no committed
-`frontend/.env.example`; create `frontend/.env` and set those values. For local
-development:
+There is currently no committed `frontend/.env.example`; create
+`frontend/.env` and set those values.
+
+For local development:
 
 1. Make sure Docker is running, then from the repository root run:
 
@@ -82,6 +102,7 @@ development:
    ```dotenv
    EXPO_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321
    EXPO_PUBLIC_SUPABASE_ANON_KEY=your-local-anon-key
+   EXPO_PUBLIC_SPOTIFY_CLIENT_ID=your-spotify-client-id
    ```
 
 2. Keep the local Supabase stack running while using the app. To stop it later,
@@ -97,6 +118,11 @@ service requires a Spotify token and writes plays as the currently
 authenticated Supabase user.
 
 ## Run the app
+
+**Note:** Spotify OAuth requires a custom Expo development build because
+SpotiMaps uses a custom URL scheme (`spotimaps://`) that Expo Go cannot
+register. To use Spotify authentication, install a development build
+and run `npx expo start --dev-client` from the `frontend/` directory.
 
 From `frontend/`, with dependencies installed and `frontend/.env` configured,
 start Expo:
