@@ -12,6 +12,7 @@ export const colors = {
 export const genreColors: Record<string, string> = {
   'R&B': '#6C63E0',
   'Hip Hop': '#4CAF6A',
+  Rap: '#E53935',
   Jazz: '#4A90E2',
 };
 export const unknownGenreColor = '#8E8E8E';

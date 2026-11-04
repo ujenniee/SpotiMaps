@@ -1,5 +1,5 @@
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { colors } from '../theme';
+import { colors, getGenreColor } from '../theme';
 import type { MapPlace } from '../data/mockData';
 import { getRankedSongs, getTotalPlays } from '../utils/placeStats';
 
@@ -55,7 +55,7 @@ export default function SongCardScreen({ place, isExpanded, onToggle, onClose }:
               key={`${song.title}-${song.artist}`}
               style={[styles.songRow, index === 0 && styles.songRowTop]}
             >
-              <View style={styles.rankBubble}>
+              <View style={[styles.rankBubble, { backgroundColor: getGenreColor(song.genre) }]}>
                 <Text style={styles.rankText}>{index + 1}</Text>
               </View>
 
@@ -158,7 +158,6 @@ const styles = StyleSheet.create({
     width: 26,
     height: 26,
     borderRadius: 13,
-    backgroundColor: colors.spotifyGreen,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 10,
