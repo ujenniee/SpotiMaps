@@ -9,13 +9,18 @@ import {
 } from 'react-native';
 
 import { connectSpotifyAccount } from '../services/SpotifyAuthService';
+import { supabase } from '../lib/supabase';
+
+
 
 type SpotifyConnectScreenProps = {
   onConnected: () => void;
+  onLogout: () => void;
 };
 
 export default function SpotifyConnectScreen({
   onConnected,
+  onLogout,
 }: SpotifyConnectScreenProps) {
   const [loading, setLoading] = useState(false);
 
@@ -38,9 +43,24 @@ export default function SpotifyConnectScreen({
 
       Alert.alert('Spotify Connection Failed', message);
     } finally {
+
       setLoading(false);
+
     }
+
   };
+
+  const handleLogout = async () => {
+    const { error } = await supabase.auth.signOut();
+  
+    if (error) {
+      Alert.alert('Log Out Failed', error.message);
+      return;
+    }
+  
+    onLogout();
+  };
+
 
   return (
     <View style={styles.container}>
@@ -66,6 +86,17 @@ export default function SpotifyConnectScreen({
             Connect with Spotify
           </Text>
         )}
+      </TouchableOpacity>
+
+
+      <TouchableOpacity onPress={handleLogout}>
+
+        <Text style={{ color: 'white', marginTop: 20 }}>
+
+          Log Out
+
+        </Text>
+
       </TouchableOpacity>
     </View>
   );

@@ -327,6 +327,11 @@ export default function App() {
   }, []);
 
   // Screen navigation
+  const goToLogin = useCallback(() => {
+
+    setStep('login');
+  
+  }, []);
 
   const goToSpotify = useCallback(() => {
 
@@ -438,7 +443,10 @@ export default function App() {
 
       {step === 'spotify' && (
 
-        <SpotifyConnectScreen onConnected={goToLocation} />
+        <SpotifyConnectScreen
+        onConnected={goToLocation}
+        onLogout={goToLogin}
+        />
 
       )}
 
