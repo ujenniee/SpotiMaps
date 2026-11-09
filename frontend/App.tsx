@@ -48,7 +48,7 @@ import {
 
 import { getSupabaseSession } from './src/services/SupabaseAuthService';
 
-const SKIP_LOGIN_FOR_TESTING = false;
+const SKIP_LOGIN_FOR_TESTING = true;
 
 const Tab = createBottomTabNavigator();
 
