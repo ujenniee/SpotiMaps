@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
-import { AppState, Linking, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Alert, AppState, Linking, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import * as Location from 'expo-location';
 import ActionButton from '../components/ActionButton';
 import { colors } from '../theme';
 import { getLocationPermission, requestLocationPermission } from '../services/LocationService';
@@ -13,15 +14,63 @@ type Props = {
 export default function LocationPermissionScreen({ onDone }: Props) {
   const [isAsking, setIsAsking] = useState(false);
   const [isBlocked, setIsBlocked] = useState(false);
+  const isLocationAlertVisible = useRef(false);
+
+  const showLocationUnavailable = useCallback(() => {
+    if (isLocationAlertVisible.current) {
+      return;
+    }
+
+    isLocationAlertVisible.current = true;
+    Alert.alert(
+      'Location Unavailable',
+      'To map where you listen, turn on Location Services and allow SpotiMaps to access your location in Settings.',
+      [
+        { text: 'Not Now', style: 'cancel', onPress: onDone },
+        {
+          text: 'Open Settings',
+          onPress: () => {
+            void Linking.openSettings().catch((error) => {
+              console.error('Could not open location settings:', error);
+            });
+          },
+        },
+      ],
+      {
+        onDismiss: () => {
+          isLocationAlertVisible.current = false;
+        },
+      },
+    );
+  }, [onDone]);
 
   const checkPermission = useCallback(async () => {
-    const permission = await getLocationPermission();
-    if (permission.granted) {
-      onDone();
-    } else {
-      setIsBlocked(!permission.canAskAgain);
+    try {
+      const [permission, servicesEnabled] = await Promise.all([
+        getLocationPermission(),
+        Location.hasServicesEnabledAsync(),
+      ]);
+
+      if (permission.granted && servicesEnabled) {
+        onDone();
+        return;
+      }
+
+      setIsBlocked(!servicesEnabled || !permission.canAskAgain);
+      if (!servicesEnabled || (!permission.granted && !permission.canAskAgain)) {
+        showLocationUnavailable();
+      }
+    } catch (error) {
+      console.error('Could not check location availability:', error);
+      showLocationUnavailable();
     }
-  }, [onDone]);
+  }, [onDone, showLocationUnavailable]);
+
+  const handleOpenSettings = () => {
+    void Linking.openSettings().catch((error) => {
+      console.error('Could not open location settings:', error);
+    });
+  };
 
   useEffect(() => {
     checkPermission();
@@ -35,17 +84,27 @@ export default function LocationPermissionScreen({ onDone }: Props) {
 
   const handleAllow = async () => {
     setIsAsking(true);
-    const result = await requestLocationPermission();
-    setIsAsking(false);
-    if (result === 'granted') {
-      onDone();
-    } else {
-      await checkPermission();
-    }
-  };
+    try {
+      const servicesEnabled = await Location.hasServicesEnabledAsync();
+      if (!servicesEnabled) {
+        setIsBlocked(true);
+        showLocationUnavailable();
+        return;
+      }
 
-  const handleOpenSettings = () => {
-    Linking.openSettings();
+      const result = await requestLocationPermission();
+      if (result === 'granted') {
+        onDone();
+      } else {
+        setIsBlocked(!(await getLocationPermission()).canAskAgain);
+        showLocationUnavailable();
+      }
+    } catch (error) {
+      console.error('Could not request location access:', error);
+      showLocationUnavailable();
+    } finally {
+      setIsAsking(false);
+    }
   };
 
   return (

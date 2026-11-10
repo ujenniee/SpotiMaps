@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState, type ComponentProps } from 'react';
+import { useCallback, useEffect, useRef, useState, type ComponentProps } from 'react';
 
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
 
 import { StatusBar } from 'expo-status-bar';
 
@@ -17,6 +17,7 @@ import Constants from 'expo-constants';
 import { colors } from './src/theme';
 
 import ActionButton from './src/components/ActionButton';
+import LocationAvailabilityAlert from './src/components/LocationAvailabilityAlert';
 
 import LoginScreen from './src/screens/LoginScreen';
 
@@ -268,6 +269,7 @@ export default function App() {
 
   );
   const [gpsOwnerId, setGpsOwnerId] = useState<string | null>(null);
+  const logoutRequested = useRef(false);
   const cleanupGPSTracking = useCallback(async () => {
     // Stop foreground tracking
     stopTracking();
@@ -351,10 +353,20 @@ export default function App() {
   // Screen navigation
   const goToLogin = useCallback(async () => {
     try {
+      logoutRequested.current = true;
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        throw error;
+      }
+
       await cleanupGPSTracking();
       setStep('login');
     } catch (error) {
-      console.error('GPS cleanup failed during logout:', error);
+      logoutRequested.current = false;
+      console.error('Failed to sign out or clean up GPS tracking:', error);
+      throw error;
+    } finally {
+      logoutRequested.current = false;
     }
   }, [cleanupGPSTracking]);
 
@@ -383,6 +395,15 @@ useEffect(() => {
     data: { subscription },
   } = supabase.auth.onAuthStateChange((event) => {
     if (event === 'SIGNED_OUT') {
+      if (logoutRequested.current) {
+        return;
+      }
+
+      Alert.alert(
+        'Session Expired',
+        'Your SpotiMaps session expired. Log in again to continue.',
+        [{ text: 'Log In' }],
+      );
       void cleanupGPSTracking()
         .then(() => {
           setStep('login');
@@ -602,6 +623,7 @@ useEffect(() => {
     <SafeAreaProvider>
 
       <StatusBar style="dark" />
+      <LocationAvailabilityAlert enabled={step === 'app'} />
 
       {/* Login */}
 
