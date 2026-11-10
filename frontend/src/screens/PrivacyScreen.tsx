@@ -19,6 +19,7 @@ type Props = {
   trackingStatus: string | null;
   onSave: (updates: PrivacySettingsUpdate) => Promise<void>;
   onRetry: () => void;
+  onLogout: () => Promise<void>;
 };
 
 // Light grey panels from the Settings Figma frame
@@ -45,6 +46,7 @@ export default function PrivacyScreen({
   trackingStatus,
   onSave,
   onRetry,
+  onLogout,
 }: Props) {
   const [hiddenPlaces, setHiddenPlaces] = useState<Record<string, boolean>>({});
   const [isSaving, setIsSaving] = useState(false);
@@ -65,6 +67,14 @@ export default function PrivacyScreen({
       setSaveError(error instanceof Error ? error.message : 'Could not save privacy settings.');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await onLogout();
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Could not log out.');
     }
   };
 
@@ -193,6 +203,16 @@ export default function PrivacyScreen({
               />
             </View>
           ))}
+        </View>
+
+        <View style={styles.logoutSection}>
+          <Pressable
+            onPress={() => void handleLogout()}
+            accessibilityRole="button"
+            style={({ pressed }) => [styles.logoutButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.logoutButtonText}>Log Out</Text>
+          </Pressable>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -337,6 +357,22 @@ const styles = StyleSheet.create({
   placeName: {
     flex: 1,
     marginRight: 12,
+  },
+  logoutSection: {
+    paddingTop: 24,
+    paddingBottom: 12,
+  },
+  logoutButton: {
+    backgroundColor: '#D9534F',
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  logoutButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
   },
   pressed: {
     opacity: 0.7,
