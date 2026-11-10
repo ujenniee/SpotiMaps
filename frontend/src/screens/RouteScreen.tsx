@@ -52,8 +52,35 @@ const ROUTE_REGION: Region = {
   longitudeDelta: 0.009,
 };
 
-export default function RouteScreen() {
-  const [isTracking, setIsTracking] = useState(false);
+type Props = {
+  isTracking: boolean;
+  isSettingsLoading: boolean;
+  trackingStatus: string | null;
+  onTrackingChange: (enabled: boolean) => Promise<void>;
+};
+
+export default function RouteScreen({
+  isTracking,
+  isSettingsLoading,
+  trackingStatus,
+  onTrackingChange,
+}: Props) {
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const toggleTracking = async () => {
+    if (isSaving || isSettingsLoading) return;
+
+    setIsSaving(true);
+    setError(null);
+    try {
+      await onTrackingChange(!isTracking);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Could not update tracking.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   return (
     <View style={styles.container}>
@@ -74,13 +101,24 @@ export default function RouteScreen() {
             styles.trackButton,
             isTracking && styles.trackButtonActive,
             pressed && styles.pressed,
+            (isSettingsLoading || isSaving) && styles.disabled,
           ]}
-          onPress={() => setIsTracking(!isTracking)}
+          onPress={() => void toggleTracking()}
+          disabled={isSettingsLoading || isSaving}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: isSettingsLoading || isSaving }}
         >
           <Text style={[styles.trackButtonText, isTracking && styles.trackButtonTextActive]}>
-            {isTracking ? 'End Tracking' : 'Start Tracking'}
+            {isSaving
+              ? 'Saving…'
+              : isTracking
+                ? 'End Tracking'
+                : 'Start Tracking'}
           </Text>
         </Pressable>
+        {error || trackingStatus ? (
+          <Text style={styles.statusText}>{error ?? trackingStatus}</Text>
+        ) : null}
       </View>
     </View>
   );
@@ -115,5 +153,17 @@ const styles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.7,
+  },
+  disabled: {
+    opacity: 0.5,
+  },
+  statusText: {
+    marginTop: 8,
+    marginHorizontal: 20,
+    padding: 8,
+    borderRadius: 6,
+    color: colors.error,
+    backgroundColor: colors.white,
+    textAlign: 'center',
   },
 });

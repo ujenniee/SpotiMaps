@@ -33,6 +33,24 @@ export type GPSReading = {
   longitude: number;
   timestamp: number;
 };
+
+function isGPSReading(value: unknown): value is GPSReading {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const reading = value as Record<string, unknown>;
+  return typeof reading.latitude === 'number'
+    && Number.isFinite(reading.latitude)
+    && reading.latitude >= -90
+    && reading.latitude <= 90
+    && typeof reading.longitude === 'number'
+    && Number.isFinite(reading.longitude)
+    && reading.longitude >= -180
+    && reading.longitude <= 180
+    && typeof reading.timestamp === 'number'
+    && Number.isFinite(reading.timestamp);
+}
+
 export type OwnedGPSReading = GPSReading & {
   userId: string;
 };
@@ -246,29 +264,27 @@ export async function startBackgroundTracking(): Promise<boolean> {
 }
 
 export async function stopBackgroundTracking(): Promise<GPSReading[]> {
-  try {
-    const tracking =
-      await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
+  const tracking =
+    await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
 
-    if (tracking) {
-      await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
-    }
+  if (tracking) {
+    await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
+  }
 
-    const saved = await AsyncStorage.getItem(BACKGROUND_STORAGE_KEY);
-
-    return saved ? (JSON.parse(saved) as GPSReading[]) : [];
-  } catch (error) {
-    console.error('Failed to stop background GPS tracking:', error);
+  const saved = await AsyncStorage.getItem(BACKGROUND_STORAGE_KEY);
+  if (saved === null) {
     return [];
   }
+
+  const readings: unknown = JSON.parse(saved);
+  if (!Array.isArray(readings) || !readings.every(isGPSReading)) {
+    throw new Error('Stored background GPS readings are invalid.');
+  }
+  return readings;
 }
 
 export async function isBackgroundTracking(): Promise<boolean> {
-  try {
-    return await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
-  } catch {
-    return false;
-  }
+  return Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
 }
 
 /** Upload a collected batch. Keep the readings on the device until this succeeds. */
