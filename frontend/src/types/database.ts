@@ -2,6 +2,8 @@ export type UserProfile = {
   id: string;
   email: string | null;
   username: string | null;
+  location_tracking_enabled: boolean;
+  map_visibility: 'private' | 'friends';
   created_at: string;
 };
 
@@ -73,10 +75,14 @@ export type Database = {
           id: string;
           email?: string | null;
           username?: string | null;
+          location_tracking_enabled?: boolean;
+          map_visibility?: 'private' | 'friends';
           created_at?: string;
         };
         Update: {
           username?: string | null;
+          location_tracking_enabled?: boolean;
+          map_visibility?: 'private' | 'friends';
         };
         Relationships: [];
       };
