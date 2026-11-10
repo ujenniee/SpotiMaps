@@ -1,9 +1,25 @@
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import type { PrivacySettings, PrivacySettingsUpdate } from '../services/PrivacySettingsService';
 import { colors } from '../theme';
 
-type MapVisibility = 'private' | 'friends';
+type Props = {
+  settings: PrivacySettings | null;
+  isSettingsLoading: boolean;
+  settingsError: string | null;
+  trackingStatus: string | null;
+  onSave: (updates: PrivacySettingsUpdate) => Promise<void>;
+  onRetry: () => void;
+};
 
 // Light grey panels from the Settings Figma frame
 const PANEL_COLOR = '#A3A3A3';
@@ -22,18 +38,39 @@ const PLACES = [
   'The Quad',
 ];
 
-// PrivacyScreen from the design doc (the "Settings" tab), built from the
-// "Privacy/Settings" Figma frame. Choices are only kept on the phone for now;
-// the next step saves them to Supabase.
-export default function PrivacyScreen() {
-  // Maps are private by default, per the design doc
-  const [mapVisibility, setMapVisibility] = useState<MapVisibility>('private');
-  const [isTrackingEnabled, setIsTrackingEnabled] = useState(true);
+export default function PrivacyScreen({
+  settings,
+  isSettingsLoading,
+  settingsError,
+  trackingStatus,
+  onSave,
+  onRetry,
+}: Props) {
   const [hiddenPlaces, setHiddenPlaces] = useState<Record<string, boolean>>({});
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const toggleHiddenPlace = (place: string) => {
     setHiddenPlaces((current) => ({ ...current, [place]: !current[place] }));
   };
+
+  const save = async (updates: PrivacySettingsUpdate) => {
+    if (isSaving) return;
+
+    setIsSaving(true);
+    setSaveError(null);
+    try {
+      await onSave(updates);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Could not save privacy settings.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const mapVisibility = settings?.map_visibility ?? 'private';
+  const isTrackingEnabled = settings?.location_tracking_enabled ?? false;
+  const settingsDisabled = !settings || isSettingsLoading || isSaving;
 
   return (
     <SafeAreaView edges={['top']} style={styles.safeArea}>
@@ -61,6 +98,24 @@ export default function PrivacyScreen() {
         {/* Privacy */}
         <Text style={styles.sectionHeader}>PRIVACY</Text>
         <View style={styles.panelNoPadding}>
+          {isSettingsLoading ? (
+            <View style={styles.messageRow}>
+              <ActivityIndicator color={colors.spotifyGreen} />
+              <Text style={styles.rowNote}>Loading privacy settings…</Text>
+            </View>
+          ) : settingsError ? (
+            <View style={styles.messageRow}>
+              <Text style={styles.errorText}>{settingsError}</Text>
+              <Pressable
+                onPress={onRetry}
+                accessibilityRole="button"
+                style={({ pressed }) => [styles.retryButton, pressed && styles.pressed]}
+              >
+                <Text style={styles.retryText}>Retry</Text>
+              </Pressable>
+            </View>
+          ) : null}
+          {saveError ? <Text style={styles.errorText}>{saveError}</Text> : null}
           <View style={[styles.row, styles.panelInner]}>
             <View style={styles.rowText}>
               <Text style={styles.rowTitle}>Location tracking</Text>
@@ -70,20 +125,26 @@ export default function PrivacyScreen() {
             </View>
             <Switch
               value={isTrackingEnabled}
-              onValueChange={setIsTrackingEnabled}
+              onValueChange={(value) => void save({ location_tracking_enabled: value })}
+              disabled={settingsDisabled}
               trackColor={{ false: colors.input, true: colors.spotifyGreen }}
               accessibilityLabel="Location tracking"
             />
           </View>
+          {trackingStatus ? <Text style={styles.statusText}>{trackingStatus}</Text> : null}
 
           <View style={styles.divider} />
 
           <View style={styles.panelInner}>
             <Text style={styles.rowTitle}>Who can see my map</Text>
-            <View style={styles.segmented} accessibilityRole="radiogroup">
+            <View
+              style={[styles.segmented, settingsDisabled && styles.disabled]}
+              accessibilityRole="radiogroup"
+            >
               <Pressable
                 style={[styles.segment, mapVisibility === 'private' && styles.segmentActive]}
-                onPress={() => setMapVisibility('private')}
+                onPress={() => void save({ map_visibility: 'private' })}
+                disabled={settingsDisabled}
                 accessibilityRole="radio"
                 accessibilityState={{ selected: mapVisibility === 'private' }}
               >
@@ -95,7 +156,8 @@ export default function PrivacyScreen() {
               </Pressable>
               <Pressable
                 style={[styles.segment, mapVisibility === 'friends' && styles.segmentActive]}
-                onPress={() => setMapVisibility('friends')}
+                onPress={() => void save({ map_visibility: 'friends' })}
+                disabled={settingsDisabled}
                 accessibilityRole="radio"
                 accessibilityState={{ selected: mapVisibility === 'friends' }}
               >
@@ -108,8 +170,8 @@ export default function PrivacyScreen() {
             </View>
             <Text style={styles.visibilityNote}>
               {mapVisibility === 'private'
-                ? 'Only you can see your map'
-                : 'Only friends you have accepted can see your map'}
+                ? 'Your map remains visible only to you'
+                : 'Saved for future friend sharing; maps remain private until sharing is implemented'}
             </Text>
           </View>
         </View>
@@ -207,6 +269,37 @@ const styles = StyleSheet.create({
   divider: {
     height: 1,
     backgroundColor: SELECTED_COLOR,
+  },
+  messageRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingTop: 12,
+  },
+  errorText: {
+    color: colors.error,
+    fontSize: 13,
+    paddingHorizontal: 14,
+    paddingTop: 10,
+  },
+  retryButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    backgroundColor: '#E6E6E6',
+  },
+  retryText: {
+    color: colors.text,
+    fontSize: 13,
+  },
+  statusText: {
+    color: colors.error,
+    fontSize: 13,
+    paddingHorizontal: 14,
+    paddingBottom: 10,
+  },
+  disabled: {
+    opacity: 0.6,
   },
   segmented: {
     flexDirection: 'row',

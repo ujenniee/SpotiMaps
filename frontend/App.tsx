@@ -44,11 +44,17 @@ import {
   syncPendingGPSReadings,
   type GPSReading,
 } from './src/services/LocationService';
+import {
+  getPrivacySettings,
+  updatePrivacySettings,
+  type PrivacySettings,
+  type PrivacySettingsUpdate,
+} from './src/services/PrivacySettingsService';
 
 import { getSupabaseSession } from './src/services/SupabaseAuthService';
 import { supabase } from './src/lib/supabase';
 
-const SKIP_LOGIN_FOR_TESTING = true;
+const SKIP_LOGIN_FOR_TESTING = false;
 
 const Tab = createBottomTabNavigator();
 
@@ -72,37 +78,18 @@ type Step = 'login' | 'spotify' | 'location' | 'app';
 
 // GPS testing screen
 
-function GpsTestScreen() {
+type GpsTestScreenProps = {
+  trackingEnabled: boolean;
+  onTrackingChange: (enabled: boolean) => Promise<void>;
+};
+
+function GpsTestScreen({ trackingEnabled, onTrackingChange }: GpsTestScreenProps) {
 
   const [gpsReading, setGpsReading] = useState<GPSReading | null>(null);
 
   const [gpsMessage, setGpsMessage] = useState('');
 
-  const [isTracking, setIsTracking] = useState(false);
-
   const [readingCount, setReadingCount] = useState<number | null>(null);
-
-  useEffect(() => {
-
-    const checkTracking = async () => {
-
-      try {
-
-        const tracking = await isBackgroundTracking();
-
-        setIsTracking(tracking);
-
-      } catch (error) {
-
-        console.warn('Failed to check GPS tracking:', error);
-
-      }
-
-    };
-
-    void checkTracking();
-
-  }, []);
 
   const testGPS = useCallback(async () => {
 
@@ -126,66 +113,15 @@ function GpsTestScreen() {
 
   }, []);
 
-  const handleStartTracking = async () => {
-
-    if (Constants.appOwnership === 'expo') {
-
-      setGpsMessage('Background GPS tracking requires a development build.');
-
-      return;
-
-    }
-
+  const handleTrackingChange = async () => {
     try {
-
-      const started = await startBackgroundTracking();
-
-      setIsTracking(started);
-
+      await onTrackingChange(!trackingEnabled);
       setReadingCount(null);
-
-      if (started) {
-
-        setGpsMessage('Tracking GPS locations in the background...');
-
-      } else {
-
-        setGpsMessage('Could not start background tracking.');
-
-      }
-
+      setGpsMessage(trackingEnabled ? 'GPS tracking stopped.' : 'GPS tracking enabled.');
     } catch (error) {
-
-      console.warn('Failed to start tracking:', error);
-
-      setGpsMessage('Failed to start GPS tracking.');
-
+      const message = error instanceof Error ? error.message : 'Could not update GPS tracking.';
+      setGpsMessage(message);
     }
-
-  };
-
-  const handleStopTracking = async () => {
-
-    try {
-
-      const readings = await stopBackgroundTracking();
-
-      console.log('GPS readings:', readings);
-
-      setIsTracking(false);
-
-      setReadingCount(readings.length);
-
-      setGpsMessage('GPS tracking stopped.');
-
-    } catch (error) {
-
-      console.warn('Failed to stop tracking:', error);
-
-      setGpsMessage('Failed to stop GPS tracking.');
-
-    }
-
   };
 
   return (
@@ -195,19 +131,12 @@ function GpsTestScreen() {
       <ActionButton label="Test GPS" onPress={testGPS} />
 
       <ActionButton
-
         label={
-
-          isTracking
-
-            ? 'Stop Background Tracking'
-
-            : 'Start Background Tracking'
-
+          trackingEnabled
+            ? 'Stop GPS Tracking'
+            : 'Start GPS Tracking'
         }
-
-        onPress={isTracking ? handleStopTracking : handleStartTracking}
-
+        onPress={handleTrackingChange}
       />
 
       <Text style={styles.statusText}>{gpsMessage}</Text>
@@ -268,6 +197,12 @@ export default function App() {
 
   );
   const [gpsOwnerId, setGpsOwnerId] = useState<string | null>(null);
+  const [privacySettings, setPrivacySettings] = useState<PrivacySettings | null>(null);
+  const [isPrivacySettingsLoading, setIsPrivacySettingsLoading] = useState(false);
+  const [privacySettingsError, setPrivacySettingsError] = useState<string | null>(null);
+  const [privacySettingsReloadKey, setPrivacySettingsReloadKey] = useState(0);
+  const [trackingStatus, setTrackingStatus] = useState<string | null>(null);
+  const isLocationTrackingEnabled = privacySettings?.location_tracking_enabled;
   const cleanupGPSTracking = useCallback(async () => {
     // Stop foreground tracking
     stopTracking();
@@ -280,9 +215,22 @@ export default function App() {
     // Remove the active owner, not their saved GPS history
     await clearGPSOwner();
     setGpsOwnerId(null);
+    setPrivacySettings(null);
+    setPrivacySettingsError(null);
+    setTrackingStatus(null);
 
     console.log('GPS tracking stopped and owner cleared.');
   }, []);
+
+  const savePrivacySettings = useCallback(async (updates: PrivacySettingsUpdate) => {
+    const savedSettings = await updatePrivacySettings(supabase, updates);
+    setPrivacySettings(savedSettings);
+    setPrivacySettingsError(null);
+  }, []);
+
+  const setTrackingEnabled = useCallback(async (enabled: boolean) => {
+    await savePrivacySettings({ location_tracking_enabled: enabled });
+  }, [savePrivacySettings]);
 
   // Restore Supabase login session
 
@@ -377,6 +325,50 @@ export default function App() {
     setStep('app');
 
   }, []);
+
+  useEffect(() => {
+    if (step === 'login') {
+      setPrivacySettings(null);
+      setIsPrivacySettingsLoading(false);
+      setPrivacySettingsError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setIsPrivacySettingsLoading(true);
+    setPrivacySettingsError(null);
+
+    const loadSettings = async () => {
+      try {
+        const settings = await getPrivacySettings(supabase);
+        if (cancelled) return;
+
+        if (!settings.location_tracking_enabled) {
+          stopTracking();
+          await stopBackgroundTracking();
+        }
+        if (!cancelled) {
+          setPrivacySettings(settings);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setPrivacySettings(null);
+          setPrivacySettingsError(
+            error instanceof Error ? error.message : 'Could not load privacy settings.',
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setIsPrivacySettingsLoading(false);
+        }
+      }
+    };
+
+    void loadSettings();
+    return () => {
+      cancelled = true;
+    };
+  }, [step, privacySettingsReloadKey]);
   // Stop GPS tracking when the Supabase user signs out
 useEffect(() => {
   const {
@@ -452,12 +444,22 @@ useEffect(() => {
       if (
         step !== 'app' ||
         Constants.appOwnership !== 'expo' ||
-        !gpsOwnerId
+        !gpsOwnerId ||
+        isLocationTrackingEnabled === undefined
       ) {
         return;
       }
 
       let cancelled = false;
+
+      if (!isLocationTrackingEnabled) {
+        stopTracking();
+        setTrackingStatus(null);
+        return () => {
+          cancelled = true;
+          stopTracking();
+        };
+      }
 
       const startAutomaticForegroundTracking = async () => {
         try {
@@ -469,11 +471,14 @@ useEffect(() => {
           }
 
           if (started) {
+            setTrackingStatus(null);
             console.log('Automatic foreground GPS tracking started.');
           } else {
+            setTrackingStatus('Could not start tracking. Check location permission.');
             console.warn('Automatic foreground GPS tracking could not start.');
           }
         } catch (error) {
+          setTrackingStatus(error instanceof Error ? error.message : 'Failed to start GPS tracking.');
           console.warn('Automatic foreground GPS tracking failed:', error);
         }
       };
@@ -484,7 +489,7 @@ useEffect(() => {
         cancelled = true;
         stopTracking();
       };
-    }, [step, gpsOwnerId]);
+    }, [step, gpsOwnerId, isLocationTrackingEnabled]);
 
   // Automatically start background GPS tracking
 
@@ -493,7 +498,8 @@ useEffect(() => {
   if (
     step !== 'app' ||
     Constants.appOwnership === 'expo' ||
-    !gpsOwnerId
+    !gpsOwnerId ||
+    isLocationTrackingEnabled === undefined
   ) {
     return;
   }
@@ -502,8 +508,13 @@ useEffect(() => {
 
   const startAutomaticTracking = async () => {
     try {
-      const alreadyTracking = await isBackgroundTracking();
+      if (!isLocationTrackingEnabled) {
+        await stopBackgroundTracking();
+        setTrackingStatus(null);
+        return;
+      }
 
+      const alreadyTracking = await isBackgroundTracking();
       if (cancelled) return;
 
       if (!alreadyTracking) {
@@ -515,10 +526,16 @@ useEffect(() => {
         }
 
         if (!started) {
+          setTrackingStatus('Could not start tracking. Check background location permission.');
           console.warn('Automatic GPS tracking could not start.');
+        } else {
+          setTrackingStatus(null);
         }
+      } else {
+        setTrackingStatus(null);
       }
     } catch (error) {
+      setTrackingStatus(error instanceof Error ? error.message : 'Failed to start GPS tracking.');
       console.warn('Automatic GPS tracking failed:', error);
     }
   };
@@ -528,7 +545,7 @@ useEffect(() => {
   return () => {
     cancelled = true;
   };
-}, [step, gpsOwnerId]);
+}, [step, gpsOwnerId, isLocationTrackingEnabled]);
   // Automatically upload saved GPS readings to Supabase
   useEffect(() => {
     if (step !== 'app' || !gpsOwnerId) {
@@ -678,13 +695,16 @@ useEffect(() => {
 
             />
 
-            <Tab.Screen
-
-              name="On-The-Go"
-
-              component={RouteScreen}
-
-            />
+            <Tab.Screen name="On-The-Go">
+              {() => (
+                <RouteScreen
+                  isTracking={isLocationTrackingEnabled ?? false}
+                  isSettingsLoading={isPrivacySettingsLoading || !privacySettings}
+                  trackingStatus={trackingStatus}
+                  onTrackingChange={setTrackingEnabled}
+                />
+              )}
+            </Tab.Screen>
 
             <Tab.Screen
 
@@ -694,21 +714,26 @@ useEffect(() => {
 
             />
 
-            <Tab.Screen
-
-              name="Settings"
-
-              component={PrivacyScreen}
-
-            />
-
-            <Tab.Screen
-
-              name="GPS Test"
-
-              component={GpsTestScreen}
-
-            />
+            <Tab.Screen name="Settings">
+              {() => (
+                <PrivacyScreen
+                  settings={privacySettings}
+                  isSettingsLoading={isPrivacySettingsLoading}
+                  settingsError={privacySettingsError}
+                  trackingStatus={trackingStatus}
+                  onSave={savePrivacySettings}
+                  onRetry={() => setPrivacySettingsReloadKey((key) => key + 1)}
+                />
+              )}
+            </Tab.Screen>
+            <Tab.Screen name="GPS Test">
+              {() => (
+                <GpsTestScreen
+                  trackingEnabled={isLocationTrackingEnabled ?? false}
+                  onTrackingChange={setTrackingEnabled}
+                />
+              )}
+            </Tab.Screen>
 
           </Tab.Navigator>
 

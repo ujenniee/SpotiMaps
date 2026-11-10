@@ -75,7 +75,10 @@ current login and listening-history flows.
 
 - Supabase Auth owns credentials and user identity in `auth.users`.
 - `public.profiles` stores app-facing profile data. A database trigger creates
-  the profile when an Auth user is created and keeps its email in sync.
+  the profile when an Auth user is created and keeps its email in sync. It also
+  stores location tracking and map visibility preferences. Existing own-profile
+  RLS policies restrict these fields to the signed-in user; selecting
+  `friends` does not grant friends access to map data yet.
 - `public.listening_history` stores Spotify plays, keyed to `auth.users.id`.
   Row-level security restricts profile and play data to the signed-in user.
 - The Expo app connects with the project's URL and public anon key. Never put
