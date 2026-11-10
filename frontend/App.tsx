@@ -198,6 +198,7 @@ export default function App() {
 
   );
   const [gpsOwnerId, setGpsOwnerId] = useState<string | null>(null);
+  const logoutRequested = useRef(false);
 
   const [privacySettings, setPrivacySettings] = useState<PrivacySettings | null>(null);
   const [isPrivacySettingsLoading, setIsPrivacySettingsLoading] = useState(false);

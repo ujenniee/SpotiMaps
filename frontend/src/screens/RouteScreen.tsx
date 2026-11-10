@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import MapView, { Polyline, type Region } from 'react-native-maps';
 import { colors, getGenreColor } from '../theme';
+import { startTracking, stopTracking } from '../services/LocationService';
 
 type RouteSegment = {
   id: string;
