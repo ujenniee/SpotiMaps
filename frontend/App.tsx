@@ -33,20 +33,20 @@ import FriendScreen from './src/screens/FriendScreen';
 import PrivacyScreen from './src/screens/PrivacyScreen';
 
 import {
-
   getCurrentLocation,
-
+  startTracking,
+  stopTracking,
   startBackgroundTracking,
-
   stopBackgroundTracking,
-
   isBackgroundTracking,
-
+  setGPSOwner,
+  clearGPSOwner,
+  syncPendingGPSReadings,
   type GPSReading,
-
 } from './src/services/LocationService';
 
 import { getSupabaseSession } from './src/services/SupabaseAuthService';
+import { supabase } from './src/lib/supabase';
 
 const SKIP_LOGIN_FOR_TESTING = false;
 
@@ -267,6 +267,22 @@ export default function App() {
     !SKIP_LOGIN_FOR_TESTING
 
   );
+  const [gpsOwnerId, setGpsOwnerId] = useState<string | null>(null);
+  const cleanupGPSTracking = useCallback(async () => {
+    // Stop foreground tracking
+    stopTracking();
+
+    // Stop background tracking
+    if (await isBackgroundTracking()) {
+      await stopBackgroundTracking();
+    }
+
+    // Remove the active owner, not their saved GPS history
+    await clearGPSOwner();
+    setGpsOwnerId(null);
+
+    console.log('GPS tracking stopped and owner cleared.');
+  }, []);
 
   // Restore Supabase login session
 
@@ -333,11 +349,14 @@ export default function App() {
   }, []);
 
   // Screen navigation
-  const goToLogin = useCallback(() => {
-
-    setStep('login');
-  
-  }, []);
+  const goToLogin = useCallback(async () => {
+    try {
+      await cleanupGPSTracking();
+      setStep('login');
+    } catch (error) {
+      console.error('GPS cleanup failed during logout:', error);
+    }
+  }, [cleanupGPSTracking]);
 
   const goToSpotify = useCallback(() => {
     if (Constants.appOwnership === 'expo') {
@@ -358,46 +377,191 @@ export default function App() {
     setStep('app');
 
   }, []);
+  // Stop GPS tracking when the Supabase user signs out
+useEffect(() => {
+  const {
+    data: { subscription },
+  } = supabase.auth.onAuthStateChange((event) => {
+    if (event === 'SIGNED_OUT') {
+      void cleanupGPSTracking()
+        .then(() => {
+          setStep('login');
+        })
+        .catch((error) => {
+          console.error('Failed to clean up GPS after sign-out:', error);
+        });
+    }
+  });
+
+  return () => {
+    subscription.unsubscribe();
+  };
+}, [cleanupGPSTracking]);
+
+  // Identify the Supabase user before starting automatic GPS tracking
+useEffect(() => {
+  if (step !== 'app') {
+    setGpsOwnerId(null);
+    return;
+  }
+
+  let cancelled = false;
+
+  const identifyGPSOwner = async () => {
+    try {
+      const {
+        data: { user },
+        error,
+      } = await supabase.auth.getUser();
+
+      if (cancelled) return;
+
+      if (error || !user) {
+        console.warn('Cannot start GPS tracking without a logged-in user.');
+        setGpsOwnerId(null);
+        return;
+      }
+
+      if (cancelled) return;
+
+      await setGPSOwner(user.id);
+
+      if (cancelled) return;
+
+      setGpsOwnerId(user.id);
+      console.log('GPS owner identified successfully.');
+    } catch (error) {
+      console.error('Failed to identify GPS owner:', error);
+
+      if (!cancelled) {
+        setGpsOwnerId(null);
+      }
+    }
+  };
+
+  void identifyGPSOwner();
+
+  return () => {
+    cancelled = true;
+  };
+}, [step]);
+
+
+    // Automatically start foreground GPS tracking in Expo Go
+    useEffect(() => {
+      if (
+        step !== 'app' ||
+        Constants.appOwnership !== 'expo' ||
+        !gpsOwnerId
+      ) {
+        return;
+      }
+
+      let cancelled = false;
+
+      const startAutomaticForegroundTracking = async () => {
+        try {
+          const started = await startTracking(gpsOwnerId);
+
+          if (cancelled) {
+            if (started) stopTracking();
+            return;
+          }
+
+          if (started) {
+            console.log('Automatic foreground GPS tracking started.');
+          } else {
+            console.warn('Automatic foreground GPS tracking could not start.');
+          }
+        } catch (error) {
+          console.warn('Automatic foreground GPS tracking failed:', error);
+        }
+      };
+
+      void startAutomaticForegroundTracking();
+
+      return () => {
+        cancelled = true;
+        stopTracking();
+      };
+    }, [step, gpsOwnerId]);
 
   // Automatically start background GPS tracking
 
-  useEffect(() => {
+// Automatically start background GPS tracking
+useEffect(() => {
+  if (
+    step !== 'app' ||
+    Constants.appOwnership === 'expo' ||
+    !gpsOwnerId
+  ) {
+    return;
+  }
 
-    if (step !== 'app' || Constants.appOwnership === 'expo') {
+  let cancelled = false;
 
-      return;
+  const startAutomaticTracking = async () => {
+    try {
+      const alreadyTracking = await isBackgroundTracking();
 
-    }
+      if (cancelled) return;
 
-    const startAutomaticTracking = async () => {
+      if (!alreadyTracking) {
+        const started = await startBackgroundTracking();
 
-      try {
-
-        const alreadyTracking = await isBackgroundTracking();
-
-        if (!alreadyTracking) {
-
-          const started = await startBackgroundTracking();
-
-          if (!started) {
-
-            console.warn('Automatic GPS tracking could not start.');
-
-          }
-
+        if (cancelled && started) {
+          await stopBackgroundTracking();
+          return;
         }
 
-      } catch (error) {
+        if (!started) {
+          console.warn('Automatic GPS tracking could not start.');
+        }
+      }
+    } catch (error) {
+      console.warn('Automatic GPS tracking failed:', error);
+    }
+  };
 
-        console.warn('Automatic GPS tracking failed:', error);
+  void startAutomaticTracking();
 
+  return () => {
+    cancelled = true;
+  };
+}, [step, gpsOwnerId]);
+  // Automatically upload saved GPS readings to Supabase
+  useEffect(() => {
+    if (step !== 'app' || !gpsOwnerId) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const syncGPS = async () => {
+      if (cancelled) {
+        return;
       }
 
+      try {
+        await syncPendingGPSReadings(supabase);
+      } catch (error) {
+        console.error('Automatic GPS sync failed:', error);
+      }
     };
 
-    void startAutomaticTracking();
+    // Upload saved readings when the user enters the app
+    void syncGPS();
 
-  }, [step]);
+    // Check for new GPS readings every 30 seconds
+    const intervalId = setInterval(() => {
+      void syncGPS();
+    }, 30000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+    };
+  }, [step, gpsOwnerId]);
 
   // Loading screen
 
