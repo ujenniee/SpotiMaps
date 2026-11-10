@@ -9,14 +9,25 @@ import {
 } from 'react-native';
 
 import { connectSpotifyAccount } from '../services/SpotifyAuthService';
-import { supabase } from '../lib/supabase';
-
 
 
 type SpotifyConnectScreenProps = {
   onConnected: () => void;
-  onLogout: () => void;
+  onLogout: () => Promise<void>;
 };
+
+function getSpotifyErrorType(error: unknown): 'session' | 'revoked' | 'connection' {
+  const message = error instanceof Error ? error.message : '';
+  if (/must be logged into spotimaps|session.*expired/i.test(message)) {
+    return 'session';
+  }
+
+  if (/spotify.*(access|authorization).*(revoked|expired)|access.*revoked/i.test(message)) {
+    return 'revoked';
+  }
+
+  return 'connection';
+}
 
 export default function SpotifyConnectScreen({
   onConnected,
@@ -34,31 +45,71 @@ export default function SpotifyConnectScreen({
 
       if (result?.success) {
         onConnected();
+      } else {
+        Alert.alert(
+          'Spotify Sign-In Canceled',
+          'Spotify wasn’t connected. You can connect your account anytime.',
+          [{ text: 'OK' }],
+        );
       }
     } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : 'Something went wrong connecting Spotify.';
-
-      Alert.alert('Spotify Connection Failed', message);
+      const errorType = getSpotifyErrorType(error);
+      if (errorType === 'session') {
+        Alert.alert(
+          'Session Expired',
+          'Your SpotiMaps session expired. Log in again to continue.',
+          [
+            { text: 'Not Now', style: 'cancel' },
+            {
+              text: 'Log In',
+              onPress: () => {
+                void onLogout().catch((logoutError) => {
+                  const message =
+                    logoutError instanceof Error
+                      ? logoutError.message
+                      : 'Something went wrong logging out.';
+                  Alert.alert('Log Out Failed', message);
+                });
+              },
+            },
+          ],
+        );
+      } else if (errorType === 'revoked') {
+        Alert.alert(
+          'Reconnect Spotify',
+          'Spotify access was removed. Reconnect your account to continue.',
+          [
+            { text: 'Later', style: 'cancel' },
+            { text: 'Reconnect', onPress: () => void handleConnect() },
+          ],
+        );
+      } else {
+        const message =
+          error instanceof Error
+            ? error.message
+            : 'Something went wrong connecting Spotify.';
+        Alert.alert(
+          'Spotify Connection Failed',
+          message,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Try Again', onPress: () => void handleConnect() },
+          ],
+        );
+      }
     } finally {
-
       setLoading(false);
-
     }
-
   };
 
   const handleLogout = async () => {
-    const { error } = await supabase.auth.signOut();
-  
-    if (error) {
-      Alert.alert('Log Out Failed', error.message);
-      return;
+    try {
+      await onLogout();
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Something went wrong logging out.';
+      Alert.alert('Log Out Failed', message);
     }
-  
-    onLogout();
   };
 
 
