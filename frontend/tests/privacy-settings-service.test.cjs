@@ -10,10 +10,18 @@ const savedSettings = {
   map_visibility: 'friends',
 };
 
-function createClient({ data = savedSettings, error = null } = {}) {
+function createClient({
+  data = savedSettings,
+  error = null,
+  user = { id: 'user-1' },
+  authError = null,
+} = {}) {
   const calls = [];
   return {
     calls,
+    auth: {
+      getUser: async () => ({ data: { user }, error: authError }),
+    },
     from(table) {
       assert.equal(table, 'profiles');
       return {
@@ -26,6 +34,10 @@ function createClient({ data = savedSettings, error = null } = {}) {
         update(updates) {
           calls.push({ operation: 'update', updates });
           return {
+            eq(column, value) {
+              calls.push({ operation: 'eq', column, value });
+              return this;
+            },
             select(columns) {
               calls.push({ operation: 'select', columns });
               return {
@@ -58,6 +70,7 @@ test('saves only the requested privacy fields and returns persisted settings', a
   );
   assert.deepEqual(client.calls, [
     { operation: 'update', updates: { location_tracking_enabled: false } },
+    { operation: 'eq', column: 'id', value: 'user-1' },
     { operation: 'select', columns: 'location_tracking_enabled, map_visibility' },
   ]);
 });
@@ -74,5 +87,15 @@ test('surfaces database errors and rejects invalid settings', async () => {
   await assert.rejects(
     updatePrivacySettings(createClient({ error: { message: 'write denied' } }), { map_visibility: 'private' }),
     /Could not save privacy settings: write denied/,
+  );
+  await assert.rejects(
+    updatePrivacySettings(createClient({ user: null }), { map_visibility: 'private' }),
+    /Sign in before updating privacy settings/,
+  );
+  await assert.rejects(
+    updatePrivacySettings(createClient({ authError: { message: 'session unavailable' } }), {
+      map_visibility: 'private',
+    }),
+    /Could not identify signed-in user: session unavailable/,
   );
 });

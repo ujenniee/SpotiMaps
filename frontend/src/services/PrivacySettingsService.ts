@@ -53,9 +53,18 @@ export async function updatePrivacySettings(
     return getPrivacySettings(client);
   }
 
+  const { data: auth, error: authError } = await client.auth.getUser();
+  if (authError) {
+    throw new Error(`Could not identify signed-in user: ${authError.message}`);
+  }
+  if (!auth.user) {
+    throw new Error('Sign in before updating privacy settings.');
+  }
+
   const { data, error } = await client
     .from('profiles')
     .update(updates)
+    .eq('id', auth.user.id)
     .select(PRIVACY_COLUMNS)
     .single();
 
