@@ -3,6 +3,7 @@ import {
   startTracking,
   stopTracking,
   syncLocationHistory,
+  setGPSOwner,
 } from '../src/services/LocationService';
 
 jest.mock('expo-location', () => ({
@@ -20,9 +21,11 @@ defineTask: jest.fn(),
 const mockPermissions = jest.mocked(Location.getForegroundPermissionsAsync);
 const mockWatchPosition = jest.mocked(Location.watchPositionAsync);
 
-beforeEach(() => {
+beforeEach(async () => {
   jest.clearAllMocks();
   stopTracking();
+
+  await setGPSOwner('test-user-id');
 
   mockPermissions.mockResolvedValue({
     granted: true,
@@ -99,7 +102,7 @@ test('starts tracking when location permission is granted', async () => {
 
   mockWatchPosition.mockResolvedValue({ remove });
 
-  const started = await startTracking();
+  const started = await startTracking('test-user-id');
 
   expect(started).toBe(true);
   expect(mockWatchPosition).toHaveBeenCalledTimes(1);
@@ -110,7 +113,7 @@ test('collects GPS readings and stops tracking', async () => {
 
   mockWatchPosition.mockResolvedValue({ remove });
 
-  await startTracking();
+  await startTracking('test-user-id');
 
   const callback = mockWatchPosition.mock.calls[0][1];
 

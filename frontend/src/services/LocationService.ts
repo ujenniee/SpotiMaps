@@ -33,6 +33,9 @@ export type GPSReading = {
   longitude: number;
   timestamp: number;
 };
+export type OwnedGPSReading = GPSReading & {
+  userId: string;
+};
 export async function getCurrentLocation(): Promise<GPSReading | null> {
   const permission = await getLocationPermission();
 
@@ -58,7 +61,81 @@ export async function getCurrentLocation(): Promise<GPSReading | null> {
 let trackingSubscription: Location.LocationSubscription | null = null;
 let trackingReadings: GPSReading[] = [];
 
-export async function startTracking(): Promise<boolean> {
+const GPS_STORAGE_KEY = 'spotimaps-gps-readings';
+export const GPS_OWNER_STORAGE_KEY = 'spotimaps-gps-owner-id';
+const GPS_OWNER_STARTED_AT_KEY = 'spotimaps-gps-owner-started-at';
+const GPS_PENDING_PREFIX = 'spotimaps-gps-pending:';
+
+
+export async function setGPSOwner(userId: string): Promise<void> {
+  if (!userId) {
+    throw new Error('Cannot set GPS owner without a user ID.');
+  }
+
+  const existingOwner = await AsyncStorage.getItem(GPS_OWNER_STORAGE_KEY);
+  const existingStart = await AsyncStorage.getItem(GPS_OWNER_STARTED_AT_KEY);
+
+  if (existingOwner === userId && existingStart !== null) {
+    return;
+  }
+
+  await AsyncStorage.multiSet([
+    [GPS_OWNER_STARTED_AT_KEY, String(Date.now())],
+    [GPS_OWNER_STORAGE_KEY, userId],
+  ]);
+}
+export async function clearGPSOwner(): Promise<void> {
+  await AsyncStorage.multiRemove([
+    GPS_OWNER_STORAGE_KEY,
+    GPS_OWNER_STARTED_AT_KEY,
+  ]);
+}
+
+let gpsStorageQueue: Promise<void> = Promise.resolve();
+
+export function saveGPSReadings(
+  readings: GPSReading[],
+  userId: string
+): Promise<void> {
+  const operation = gpsStorageQueue.then(async () => {
+    if (readings.length === 0) {
+      return;
+    }
+
+    if (!userId) {
+      throw new Error('Cannot save GPS readings without an owner.');
+    }
+
+    const ownedReadings: OwnedGPSReading[] = readings.map((reading) => ({
+      ...reading,
+      userId,
+    }));
+
+    const batchKey =
+      `${GPS_PENDING_PREFIX}${userId}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+
+    await AsyncStorage.setItem(
+      batchKey,
+      JSON.stringify(ownedReadings)
+    );
+
+    console.log(
+      `Saved ${ownedReadings.length} foreground GPS readings locally.`
+    );
+  });
+
+  gpsStorageQueue = operation.catch((error) => {
+    console.error('Failed to save GPS readings:', error);
+  });
+
+  return operation;
+}
+
+export async function startTracking(userId: string): Promise<boolean> {
+  if (!userId) {
+    return false;
+  }
+
   if (trackingSubscription) {
     return false;
   }
@@ -66,6 +143,13 @@ export async function startTracking(): Promise<boolean> {
   const permission = await getLocationPermission();
 
   if (!permission.granted) {
+    return false;
+  }
+
+  // Confirm this user is still the active GPS owner.
+  const currentOwner = await AsyncStorage.getItem(GPS_OWNER_STORAGE_KEY);
+
+  if (currentOwner !== userId) {
     return false;
   }
 
@@ -79,11 +163,20 @@ export async function startTracking(): Promise<boolean> {
         timeInterval: 5000,
       },
       (position) => {
-        trackingReadings.push({
+        const reading: GPSReading = {
           latitude: position.coords.latitude,
           longitude: position.coords.longitude,
           timestamp: position.timestamp,
+        };
+
+        trackingReadings.push(reading);
+
+        // Save using the owner who started this tracking session.
+        void saveGPSReadings([reading], userId).catch((error) => {
+          console.error('Could not persist foreground GPS reading:', error);
         });
+
+        console.log('Automatic GPS reading:', reading);
       }
     );
 
@@ -137,7 +230,6 @@ export async function startBackgroundTracking(): Promise<boolean> {
       return false;
     }
 
-    await AsyncStorage.removeItem(BACKGROUND_STORAGE_KEY);
 
     await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
       accuracy: Location.Accuracy.High,
@@ -239,4 +331,125 @@ export async function syncLocationHistory(
     matchingError = error instanceof Error ? error.message : 'Could not request song-location matching.';
   }
   return { receivedCount: readings.length, insertedCount, matchingError };
+}
+let pendingGPSSync: Promise<void> | null = null;
+
+/**
+ * Upload locally saved GPS readings belonging to
+ * the currently authenticated Supabase user.
+ */
+export function syncPendingGPSReadings(
+  client: SupabaseClient<Database>,
+): Promise<void> {
+  // Prevent multiple uploads from running simultaneously.
+  if (pendingGPSSync) {
+    return pendingGPSSync;
+  }
+
+  const operation = (async () => {
+    // Get the authenticated Supabase user.
+    const { data: auth, error: authError } = await client.auth.getUser();
+
+    if (authError || !auth.user) {
+      return;
+    }
+
+    const userId = auth.user.id;
+    const prefix = `${GPS_PENDING_PREFIX}${userId}:`;
+
+    // Find locally stored GPS batches for this user.
+    const keys = (await AsyncStorage.getAllKeys())
+      .filter((key) => key.startsWith(prefix))
+      .sort();
+
+    for (const key of keys) {
+      // Stop syncing if the authenticated user changes.
+      const { data: currentAuth, error: currentError } =
+        await client.auth.getUser();
+
+      if (currentError || currentAuth.user?.id !== userId) {
+        return;
+      }
+
+      const raw = await AsyncStorage.getItem(key);
+
+      if (raw === null) {
+        continue;
+      }
+
+      let readings: OwnedGPSReading[];
+
+      try {
+        const parsed: unknown = JSON.parse(raw);
+
+        // Reject batches that do not belong to this user.
+        if (
+          !Array.isArray(parsed) ||
+          parsed.length === 0 ||
+          !parsed.every(
+            (item): item is OwnedGPSReading =>
+              item !== null &&
+              typeof item === 'object' &&
+              'userId' in item &&
+              item.userId === userId &&
+              'latitude' in item &&
+              typeof item.latitude === 'number' &&
+              'longitude' in item &&
+              typeof item.longitude === 'number' &&
+              'timestamp' in item &&
+              typeof item.timestamp === 'number'
+          )
+        ) {
+          console.error(
+            'Invalid or mismatched GPS batch; leaving it untouched:',
+            key
+          );
+          continue;
+        }
+
+        readings = parsed;
+      } catch (error) {
+        console.error(
+          'Could not parse GPS batch; leaving it untouched:',
+          key,
+          error
+        );
+        continue;
+      }
+
+      try {
+        // Upload GPS readings to Supabase.
+        const result = await syncLocationHistory(client, readings);
+
+        // Keep the batch if song-location matching failed.
+        if (result.matchingError) {
+          console.warn(
+            'GPS uploaded, but song matching needs retry:',
+            result.matchingError
+          );
+          continue;
+        }
+
+        // Remove the local batch only after successful processing.
+        await AsyncStorage.removeItem(key);
+
+        console.log(
+          `Synced ${readings.length} GPS readings to Supabase.`
+        );
+      } catch (error) {
+        // Keep failed batches locally so they can be retried.
+        console.error(
+          'GPS upload failed; keeping batch for retry:',
+          error
+        );
+        return;
+      }
+    }
+  })();
+
+  pendingGPSSync = operation.finally(() => {
+    pendingGPSSync = null;
+  });
+
+  return pendingGPSSync;
 }
