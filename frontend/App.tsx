@@ -292,7 +292,13 @@ export default function App() {
 
         }
 
-        setStep(session ? 'spotify' : 'login');
+        setStep(
+          session
+            ? Constants.appOwnership === 'expo'
+              ? 'location'
+              : 'spotify'
+            : 'login'
+        );
 
       } catch (error) {
 
@@ -334,9 +340,11 @@ export default function App() {
   }, []);
 
   const goToSpotify = useCallback(() => {
-
-    setStep('spotify');
-
+    if (Constants.appOwnership === 'expo') {
+      setStep('location');
+    } else {
+      setStep('spotify');
+    }
   }, []);
 
   const goToLocation = useCallback(() => {
