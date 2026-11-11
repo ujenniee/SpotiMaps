@@ -205,7 +205,6 @@ export default function App() {
   const [privacySettingsError, setPrivacySettingsError] = useState<string | null>(null);
   const [privacySettingsReloadKey, setPrivacySettingsReloadKey] = useState(0);
   const [trackingStatus, setTrackingStatus] = useState<string | null>(null);
-  const logoutRequested = useRef(false);
   const isLocationTrackingEnabled = privacySettings?.location_tracking_enabled;
 
   const cleanupGPSTracking = useCallback(async () => {
