@@ -6,6 +6,20 @@ const settings = {
   map_visibility: 'private' as const,
 };
 
+const renderPrivacyScreen = (overrides = {}) =>
+  render(
+    <PrivacyScreen
+      settings={settings}
+      isSettingsLoading={false}
+      settingsError={null}
+      trackingStatus={null}
+      onSave={jest.fn().mockResolvedValue(undefined)}
+      onRetry={jest.fn()}
+      onLogout={jest.fn().mockResolvedValue(undefined)}
+      {...overrides}
+    />,
+  );
+
 test('saves tracking and map visibility choices', async () => {
   const onSave = jest.fn().mockResolvedValue(undefined);
   const screen = await render(
@@ -16,6 +30,7 @@ test('saves tracking and map visibility choices', async () => {
       trackingStatus={null}
       onSave={onSave}
       onRetry={jest.fn()}
+      onLogout={jest.fn().mockResolvedValue(undefined)}
     />,
   );
 
@@ -40,6 +55,7 @@ test('shows save failures without changing the saved preference', async () => {
       trackingStatus={null}
       onSave={onSave}
       onRetry={jest.fn()}
+      onLogout={jest.fn().mockResolvedValue(undefined)}
     />,
   );
 
@@ -47,4 +63,25 @@ test('shows save failures without changing the saved preference', async () => {
 
   expect(await screen.findByText('Network unavailable')).toBeTruthy();
   expect(screen.getByLabelText('Location tracking').props.value).toBe(true);
+});
+
+test('logs the user out from the settings screen', async () => {
+  const onLogout = jest.fn().mockResolvedValue(undefined);
+  const screen = await render(
+    <PrivacyScreen
+      settings={settings}
+      isSettingsLoading={false}
+      settingsError={null}
+      trackingStatus={null}
+      onSave={jest.fn().mockResolvedValue(undefined)}
+      onRetry={jest.fn()}
+      onLogout={onLogout}
+    />,
+  );
+
+  fireEvent.press(screen.getByText('Log Out'));
+
+  await waitFor(() => {
+    expect(onLogout).toHaveBeenCalledTimes(1);
+  });
 });
