@@ -760,6 +760,7 @@ useEffect(() => {
                   trackingStatus={trackingStatus}
                   onSave={savePrivacySettings}
                   onRetry={() => setPrivacySettingsReloadKey((key) => key + 1)}
+                  onLogout={goToLogin}
                 />
               )}
             </Tab.Screen>
