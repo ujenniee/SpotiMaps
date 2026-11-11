@@ -177,7 +177,7 @@ export async function startTracking(userId: string): Promise<boolean> {
     trackingSubscription = await Location.watchPositionAsync(
       {
         accuracy: Location.Accuracy.High,
-        distanceInterval: 5,
+        distanceInterval: 20,
         timeInterval: 5000,
       },
       (position) => {
@@ -242,16 +242,17 @@ export async function startBackgroundTracking(): Promise<boolean> {
       return false;
     }
 
-    const granted = await requestBackgroundLocationPermission();
-
-    if (!granted) {
+    const foreground = await Location.getForegroundPermissionsAsync();
+    const background = await Location.getBackgroundPermissionsAsync();
+    
+    if (!foreground.granted || !background.granted) {
       return false;
     }
 
 
     await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
       accuracy: Location.Accuracy.High,
-      distanceInterval: 5,
+      distanceInterval: 20,
       pausesUpdatesAutomatically: false,
       showsBackgroundLocationIndicator: true,
     });

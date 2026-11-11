@@ -38,6 +38,7 @@ import {
   startTracking,
   stopTracking,
   startBackgroundTracking,
+  requestBackgroundLocationPermission,
   stopBackgroundTracking,
   isBackgroundTracking,
   setGPSOwner,
@@ -233,9 +234,21 @@ export default function App() {
   }, []);
 
   const setTrackingEnabled = useCallback(async (enabled: boolean) => {
+    if (enabled && Constants.appOwnership !== 'expo') {
+      const granted = await requestBackgroundLocationPermission();
+  
+      if (!granted) {
+        setTrackingStatus('Background location access is required to enable tracking.');
+        return;
+      }
+    }
+  
     await savePrivacySettings({ location_tracking_enabled: enabled });
+  
+    if (!enabled) {
+      setTrackingStatus(null);
+    }
   }, [savePrivacySettings]);
-
   // Restore Supabase login session
 
   useEffect(() => {
