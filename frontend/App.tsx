@@ -32,6 +32,7 @@ import RouteScreen from './src/screens/RouteScreen';
 import FriendScreen from './src/screens/FriendScreen';
 
 import PrivacyScreen from './src/screens/PrivacyScreen';
+import FriendMapScreen from './src/screens/FriendMapScreen';
 
 import {
   getCurrentLocation,
