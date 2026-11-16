@@ -22,14 +22,11 @@ type Props = {
   onLogout: () => Promise<void>;
 };
 
-// Light grey panels from the Settings Figma frame
 const PANEL_COLOR = '#A3A3A3';
 const SELECTED_COLOR = '#6B6F80';
 
-// TODO: replace with the real Spotify name once Harley's connection check exists
 const SPOTIFY_DISPLAY_NAME = 'harley.z';
 
-// TODO: replace with the user's real places from Supabase
 const PLACES = [
   'Bill & Melinda Gates Center',
   'Paul G. Allen Center of Computer Science',
