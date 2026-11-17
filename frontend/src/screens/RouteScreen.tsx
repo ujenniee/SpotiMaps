@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import MapView, { Polyline, type Region } from 'react-native-maps';
 import { colors, getGenreColor } from '../theme';
-import { startTracking, stopTracking } from '../services/LocationService';
-
+import { startOnTheGoSession, endOnTheGoSession, getActiveOnTheGoSession,}
+from '../services/OnTheGoService';
+import type { GPSReading } from '../services/LocationService';
 type RouteSegment = {
   id: string;
   song: string;
@@ -54,6 +55,7 @@ const ROUTE_REGION: Region = {
 };
 
 type Props = {
+  userId: string | null;
   isTracking: boolean;
   isSettingsLoading: boolean;
   trackingStatus: string | null;
@@ -61,6 +63,7 @@ type Props = {
 };
 
 export default function RouteScreen({
+  userId,
   isTracking,
   isSettingsLoading,
   trackingStatus,
@@ -68,16 +71,118 @@ export default function RouteScreen({
 }: Props) {
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isTripActive, setIsTripActive] = useState(false);
+  const [isTripLoading, setIsTripLoading] = useState(true);
+  const [routeReadings, setRouteReadings] = useState<GPSReading[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+
+    setIsTripLoading(true);
+    setIsTripActive(false);
+
+    const loadActiveTrip = async () => {
+      if (!userId) {
+        if (!cancelled) setIsTripLoading(false);
+        return;
+      }
+
+      try {
+        const session = await getActiveOnTheGoSession(userId);
+
+        if (!cancelled) {
+          setIsTripActive(session !== null);
+          setRouteReadings(session?.readings ?? []);
+        }
+      } catch (loadError) {
+        if (!cancelled) {
+          setError(
+            loadError instanceof Error
+              ? loadError.message
+              : 'Could not load your trip.'
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setIsTripLoading(false);
+        }
+      }
+    };
+
+    void loadActiveTrip();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+  useEffect(() => {
+    if (!userId || !isTripActive) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const refreshRoute = async () => {
+      try {
+        const session = await getActiveOnTheGoSession(userId);
+
+        if (!cancelled && session) {
+          setRouteReadings(session.readings);
+        }
+      } catch (error) {
+        console.error('Could not refresh On-the-Go route:', error);
+      }
+    };
+
+    void refreshRoute();
+
+    const interval = setInterval(() => {
+      void refreshRoute();
+    }, 3000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [userId, isTripActive]);
 
   const toggleTracking = async () => {
-    if (isSaving || isSettingsLoading) return;
+    if (isSaving || isTripLoading || isSettingsLoading || !userId) {
+      return;
+    }
 
     setIsSaving(true);
     setError(null);
+
     try {
-      await onTrackingChange(!isTracking);
+      if (isTripActive) {
+        const completedTrip = await endOnTheGoSession(userId);
+
+        setIsTripActive(false);
+        setRouteReadings(completedTrip.readings);
+
+        console.log(
+          `Trip completed with ${completedTrip.readings.length} GPS readings.`
+        );
+      } else {
+        if (!isTracking) {
+          throw new Error(
+            'Enable location tracking in Settings before starting a trip.'
+          );
+        }
+
+        await startOnTheGoSession(userId);
+
+        setRouteReadings([]);
+        setIsTripActive(true);
+
+        console.log('On-the-Go trip started.');
+      }
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : 'Could not update tracking.');
+      setError(
+        saveError instanceof Error
+          ? saveError.message
+          : 'Could not update your trip.'
+      );
     } finally {
       setIsSaving(false);
     }
@@ -85,34 +190,48 @@ export default function RouteScreen({
 
   return (
     <View style={styles.container}>
-      <MapView style={StyleSheet.absoluteFill} initialRegion={ROUTE_REGION} showsUserLocation>
-        {ROUTE.map((segment) => (
-          <Polyline
-            key={segment.id}
-            coordinates={segment.coordinates}
-            strokeColor={getGenreColor(segment.genre)}
-            strokeWidth={5}
-          />
-        ))}
-      </MapView>
+<MapView
+  style={StyleSheet.absoluteFill}
+  initialRegion={ROUTE_REGION}
+  showsUserLocation
+  followsUserLocation
+>
+  {routeReadings.length >= 2 && (
+    <Polyline
+      coordinates={routeReadings.map((reading) => ({
+        latitude: reading.latitude,
+        longitude: reading.longitude,
+      }))}
+      strokeColor={colors.spotifyGreen}
+      strokeWidth={5}
+    />
+  )}
+</MapView>
 
       <View style={styles.bottomArea} pointerEvents="box-none">
         <Pressable
           style={({ pressed }) => [
             styles.trackButton,
-            isTracking && styles.trackButtonActive,
+            isTripActive && styles.trackButtonActive,
             pressed && styles.pressed,
-            (isSettingsLoading || isSaving) && styles.disabled,
+            (isSettingsLoading || isSaving || isTripLoading || !userId) && styles.disabled,
           ]}
           onPress={() => void toggleTracking()}
-          disabled={isSettingsLoading || isSaving}
+          disabled={isSettingsLoading || isSaving || isTripLoading || !userId}
           accessibilityRole="button"
-          accessibilityState={{ disabled: isSettingsLoading || isSaving }}
+          accessibilityState={{
+            disabled: isSettingsLoading || isSaving || isTripLoading || !userId,
+          }}
         >
-          <Text style={[styles.trackButtonText, isTracking && styles.trackButtonTextActive]}>
-            {isSaving
-              ? 'Saving…'
-              : isTracking
+          <Text
+            style={[
+              styles.trackButtonText,
+              isTripActive && styles.trackButtonTextActive,
+            ]}
+          >
+            {isSaving || isTripLoading
+              ? 'Loading…'
+              : isTripActive
                 ? 'End Tracking'
                 : 'Start Tracking'}
           </Text>

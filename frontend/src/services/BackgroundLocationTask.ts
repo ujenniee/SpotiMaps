@@ -1,7 +1,7 @@
 import * as TaskManager from 'expo-task-manager';
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
+import { appendOnTheGoReadings } from './OnTheGoService';
 export const BACKGROUND_LOCATION_TASK = 'spotimaps-background-location';
 const STORAGE_KEY = 'spotimaps-gps-readings';
 const GPS_OWNER_STORAGE_KEY = 'spotimaps-gps-owner-id';
@@ -65,6 +65,13 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
       await AsyncStorage.setItem(batchKey, JSON.stringify(readings));
 
       console.log(`Saved ${readings.length} background GPS readings locally.`);
+      // Also save GPS readings to an active On-the-Go trip.
+      try {
+        await appendOnTheGoReadings(userId, readings);
+      } catch (error) {
+        console.error('Failed to save On-the-Go GPS readings:', error);
+      }
+
     } catch (error) {
       console.error('Failed to save background GPS:', error);
     }

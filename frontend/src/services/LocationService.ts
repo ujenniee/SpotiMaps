@@ -155,7 +155,7 @@ export async function startTracking(userId: string): Promise<boolean> {
   }
 
   if (trackingSubscription) {
-    return false;
+    return true;
   }
 
   const permission = await getLocationPermission();
@@ -238,13 +238,13 @@ export async function startBackgroundTracking(): Promise<boolean> {
     const alreadyTracking =
       await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
 
-    if (alreadyTracking) {
-      return false;
-    }
+      if (alreadyTracking) {
+        return true;
+      }
 
     const foreground = await Location.getForegroundPermissionsAsync();
     const background = await Location.getBackgroundPermissionsAsync();
-    
+
     if (!foreground.granted || !background.granted) {
       return false;
     }
