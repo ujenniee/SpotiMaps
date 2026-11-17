@@ -9,6 +9,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import UsernameSection from '../components/UsernameSection';
 import type { PrivacySettings, PrivacySettingsUpdate } from '../services/PrivacySettingsService';
 import { colors } from '../theme';
 
@@ -83,6 +84,7 @@ export default function PrivacyScreen({
     <SafeAreaView edges={['top']} style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.title}>Settings</Text>
+        <UsernameSection />
 
         {/* Spotify connection */}
         <Text style={styles.sectionHeader}>SPOTIFY</Text>
