@@ -2,11 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import { LayoutAnimation, Pressable, StyleSheet, Text, View } from 'react-native';
 import MapView, { Marker, type Region } from 'react-native-maps';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors, genreColors, getGenreColor } from '../theme';
+import { colors, getGenreColor } from '../theme';
 import { supabase } from '../lib/supabase';
 import type { MapPlace } from '../data/mockData';
 import { fetchMapPlaces } from '../services/MapDataService';
-import { getTopGenre, getTotalPlays } from '../utils/placeStats';
+import { getPresentGenreFamilies, getTopGenre, getTotalPlays } from '../utils/placeStats';
 import SongCardScreen from './SongCardScreen';
 
 // Starting view: centered on the UW campus
@@ -100,6 +100,7 @@ export default function MapScreen() {
       250,
     );
   };
+  const presentGenres = getPresentGenreFamilies(places);
 
   return (
     <View style={styles.container}>
@@ -131,14 +132,16 @@ export default function MapScreen() {
       </MapView>
 
       <SafeAreaView edges={['top']} style={styles.overlay} pointerEvents="box-none">
-        <View style={styles.legend}>
-          {Object.entries(genreColors).map(([genre, color]) => (
-            <View key={genre} style={styles.legendRow}>
-              <View style={[styles.legendDot, { backgroundColor: color }]} />
-              <Text style={styles.legendText}>{genre}</Text>
-            </View>
-          ))}
-        </View>
+        {presentGenres.length > 0 ? (
+          <View style={styles.legend}>
+            {presentGenres.map((genre) => (
+              <View key={genre} style={styles.legendRow}>
+                <View style={[styles.legendDot, { backgroundColor: getGenreColor(genre) }]} />
+                <Text style={styles.legendText}>{genre}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
 
         <View style={styles.zoomButtons}>
           <Pressable style={styles.zoomButton} onPress={() => zoom(0.5)} accessibilityLabel="Zoom in">

@@ -1,4 +1,5 @@
 import type { MapPlace, Song } from '../data/mockData';
+import { getGenreFamily } from '../theme.ts';
 
 export type GenreShare = {
   genre: string | null;
@@ -27,6 +28,18 @@ export function getGenreBreakdown(place: MapPlace): GenreShare[] {
 
 export function getTopGenre(place: MapPlace): string | null {
   return getGenreBreakdown(place)[0]?.genre ?? null;
+}
+
+export function getPresentGenreFamilies(places: MapPlace[]): string[] {
+  const genres = new Set<string>();
+  places.forEach((place) => {
+    place.songs.forEach((song) => {
+      if (song.plays > 0) {
+        genres.add(getGenreFamily(song.genre));
+      }
+    });
+  });
+  return [...genres].sort((a, b) => a.localeCompare(b));
 }
 
 // Songs sorted by most played, for the Song Card list
