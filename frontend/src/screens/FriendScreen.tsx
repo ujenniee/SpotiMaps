@@ -17,6 +17,7 @@ import {
   type FriendSearchResult,
 } from '../services/FriendService';
 import { colors } from '../theme';
+import FriendMapScreen from './FriendMapScreen';
 
 function Avatar({ name, color }: { name: string; color: string }) {
   return (
@@ -37,6 +38,8 @@ export default function FriendScreen() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  // The friend whose map is open, or null when showing the friends list
+  const [viewingFriend, setViewingFriend] = useState<Friend | null>(null);
   const isMounted = useRef(true);
 
   const loadData = useCallback(async () => {
@@ -120,6 +123,16 @@ export default function FriendScreen() {
       if (isMounted.current) setBusy(false);
     }
   };
+
+  if (viewingFriend) {
+    return (
+      <FriendMapScreen
+        friendId={viewingFriend.id}
+        friendName={viewingFriend.name}
+        onBack={() => setViewingFriend(null)}
+      />
+    );
+  }
 
   const filteredFriends = friends.filter((friend) => {
     const normalizedSearch = search.trim().toLowerCase();
@@ -229,6 +242,7 @@ export default function FriendScreen() {
                   label={friend.mapVisible ? 'View Map' : 'Map is Private'}
                   variant="dark"
                   disabled={!friend.mapVisible}
+                  onPress={() => setViewingFriend(friend)}
                 />
                 <SmallActionButton
                   label="Remove"
