@@ -59,10 +59,70 @@ export type MatchedListeningEvent = Pick<
   match_status: 'matched' | 'unmatched';
 };
 
+export type FriendMapEvent = {
+  id: string;
+  location_id: string;
+  title: string;
+  artist: string;
+  genre: string | null;
+  latitude: number;
+  longitude: number;
+  listened_at: string;
+};
+
+export type FriendSummary = {
+  friend_id: string;
+  username: string | null;
+  map_visible: boolean;
+};
+
+export type FriendRequestSummary = {
+  id: string;
+  other_user_id: string;
+  username: string | null;
+  direction: 'incoming' | 'outgoing';
+  created_at: string;
+};
+
+export type UserSearchResult = {
+  id: string;
+  username: string;
+};
+
+export type FriendRequestRow = {
+  id: string;
+  requester_id: string;
+  recipient_id: string;
+  created_at: string;
+};
+
 // Only tables defined in committed migrations are included in the client schema.
 export type Database = {
   public: {
     Tables: {
+      friendships: {
+        Row: {
+          user_low: string;
+          user_high: string;
+          created_at: string;
+        };
+        Insert: {
+          user_low: string;
+          user_high: string;
+          created_at?: string;
+        };
+        Update: never;
+        Relationships: [];
+      };
+      friend_requests: {
+        Row: FriendRequestRow;
+        Insert: Pick<FriendRequestRow, 'requester_id' | 'recipient_id'> & {
+          id?: string;
+          created_at?: string;
+        };
+        Update: never;
+        Relationships: [];
+      };
       location_samples: {
         Row: StoredLocationSample;
         Insert: LocationSampleInsert;
@@ -101,6 +161,48 @@ export type Database = {
     };
     Views: { [key: string]: never };
     Functions: {
+      search_users: {
+        Args: { p_username: string };
+        Returns: UserSearchResult[];
+      };
+      list_friends: {
+        Args: Record<string, never>;
+        Returns: FriendSummary[];
+      };
+      list_friend_requests: {
+        Args: Record<string, never>;
+        Returns: FriendRequestSummary[];
+      };
+      send_friend_request: {
+        Args: { p_recipient_id: string };
+        Returns: string;
+      };
+      accept_friend_request: {
+        Args: { p_request_id: string };
+        Returns: boolean;
+      };
+      decline_friend_request: {
+        Args: { p_request_id: string };
+        Returns: boolean;
+      };
+      cancel_friend_request: {
+        Args: { p_request_id: string };
+        Returns: boolean;
+      };
+      remove_friend: {
+        Args: { p_friend_id: string };
+        Returns: boolean;
+      };
+      get_friend_map: {
+        Args: {
+          p_friend_id: string;
+          p_from: string;
+          p_to: string;
+          p_limit?: number;
+          p_offset?: number;
+        };
+        Returns: FriendMapEvent[];
+      };
       match_listening_locations: {
         Args: { p_from: string; p_to: string; p_max_gap_seconds?: number };
         Returns: ListeningMatchResult[];
@@ -113,11 +215,4 @@ export type Database = {
     Enums: { [key: string]: never };
     CompositeTypes: { [key: string]: never };
   };
-};
-
-export type FriendConnection = {
-  id: string;
-  user_id: string;
-  friend_id: string;
-  created_at: string | null;
 };

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import SmallActionButton from '../components/SmallActionButton';
+import { supabase } from '../lib/supabase';
 import { fetchFriendRequests, fetchFriends, type Friend, type FriendRequest } from '../services/FriendService';
 import { colors } from '../theme';
 
@@ -17,19 +18,26 @@ export default function FriendScreen() {
   const [search, setSearch] = useState('');
   const [requests, setRequests] = useState<FriendRequest[]>([]);
   const [friends, setFriends] = useState<Friend[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
 
     async function loadData() {
-      const [nextRequests, nextFriends] = await Promise.all([
-        fetchFriendRequests(),
-        fetchFriends(),
-      ]);
+      try {
+        const [nextRequests, nextFriends] = await Promise.all([
+          fetchFriendRequests(supabase),
+          fetchFriends(supabase),
+        ]);
 
-      if (isMounted) {
-        setRequests(nextRequests);
-        setFriends(nextFriends);
+        if (isMounted) {
+          setRequests(nextRequests);
+          setFriends(nextFriends);
+        }
+      } catch (error) {
+        if (isMounted) {
+          setLoadError(error instanceof Error ? error.message : 'Could not load friends.');
+        }
       }
     }
 
@@ -49,6 +57,7 @@ export default function FriendScreen() {
     <SafeAreaView edges={['top']} style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <Text style={styles.title}>Friends</Text>
+        {loadError ? <Text style={styles.loadError}>{loadError}</Text> : null}
 
         <TextInput
           style={styles.search}
@@ -112,6 +121,10 @@ const styles = StyleSheet.create({
     color: colors.text,
     marginTop: 16,
     marginBottom: 12,
+  },
+  loadError: {
+    color: colors.textMuted,
+    marginBottom: 8,
   },
   search: {
     backgroundColor: colors.input,
