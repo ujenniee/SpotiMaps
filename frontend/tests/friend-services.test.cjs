@@ -47,7 +47,7 @@ test('friend service maps request and friend RPC results', async () => {
   assert.deepEqual(calls.map(([name]) => name), ['list_friend_requests', 'list_friends']);
 });
 
-test('friend service searches exact usernames and sends/accepts requests through RPCs', async () => {
+test('friend service searches usernames and sends/accepts requests through RPCs', async () => {
   const calls = [];
   const client = {
     async rpc(name, args) {

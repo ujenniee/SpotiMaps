@@ -62,6 +62,7 @@ export default function SongCardScreen({ place, isExpanded, onToggle, onClose }:
               <View style={styles.songMeta}>
                 <Text style={styles.songTitle}>{song.title}</Text>
                 <Text style={styles.songArtist}>{song.artist}</Text>
+                <Text style={styles.songGenre}>{song.genre ?? 'Other'}</Text>
               </View>
 
               <View style={styles.playColumn}>
@@ -177,6 +178,11 @@ const styles = StyleSheet.create({
   },
   songArtist: {
     fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  songGenre: {
+    fontSize: 11,
     color: colors.textMuted,
     marginTop: 2,
   },
