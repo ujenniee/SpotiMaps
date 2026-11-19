@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BACKGROUND_LOCATION_TASK } from './BackgroundLocationTask';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database, LocationSampleInsert } from '../types/database';
-
+import { appendOnTheGoReadings } from './OnTheGoService';
 export type LocationPermission = 'granted' | 'denied';
 
 export type LocationPermissionStatus = {
@@ -188,6 +188,9 @@ export async function startTracking(userId: string): Promise<boolean> {
         };
 
         trackingReadings.push(reading);
+        void appendOnTheGoReadings(userId, [reading]).catch((error) => {
+          console.error('Could not save On-the-Go foreground reading:', error);
+        });
 
         // Save using the owner who started this tracking session.
         void saveGPSReadings([reading], userId).catch((error) => {
