@@ -34,6 +34,7 @@ import RouteScreen from './src/screens/RouteScreen';
 import FriendScreen from './src/screens/FriendScreen';
 
 import PrivacyScreen from './src/screens/PrivacyScreen';
+import FriendMapScreen from './src/screens/FriendMapScreen';
 
 import {
   getCurrentLocation,
@@ -200,13 +201,12 @@ export default function App() {
 
   );
   const [gpsOwnerId, setGpsOwnerId] = useState<string | null>(null);
-  const logoutRequested = useRef(false);
-
   const [privacySettings, setPrivacySettings] = useState<PrivacySettings | null>(null);
   const [isPrivacySettingsLoading, setIsPrivacySettingsLoading] = useState(false);
   const [privacySettingsError, setPrivacySettingsError] = useState<string | null>(null);
   const [privacySettingsReloadKey, setPrivacySettingsReloadKey] = useState(0);
   const [trackingStatus, setTrackingStatus] = useState<string | null>(null);
+  const logoutRequested = useRef(false);
   const isLocationTrackingEnabled = privacySettings?.location_tracking_enabled;
 
   const cleanupGPSTracking = useCallback(async () => {

@@ -5,12 +5,19 @@ type Props = {
   label: string;
   variant?: 'light' | 'dark';
   disabled?: boolean;
+  onPress?: () => void;
 };
 
-export default function SmallActionButton({ label, variant = 'dark', disabled = false }: Props) {
+export default function SmallActionButton({
+  label,
+  variant = 'dark',
+  disabled = false,
+  onPress,
+}: Props) {
   return (
     <Pressable
       disabled={disabled}
+      onPress={onPress}
       style={({ pressed }) => [
         styles.smallButton,
         variant === 'light' ? styles.smallButtonLight : styles.smallButtonDark,
