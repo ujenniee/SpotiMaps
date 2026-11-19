@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BACKGROUND_LOCATION_TASK } from './BackgroundLocationTask';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database, LocationSampleInsert } from '../types/database';
-
+import { appendOnTheGoReadings } from './OnTheGoService';
 export type LocationPermission = 'granted' | 'denied';
 
 export type LocationPermissionStatus = {
@@ -155,7 +155,7 @@ export async function startTracking(userId: string): Promise<boolean> {
   }
 
   if (trackingSubscription) {
-    return false;
+    return true;
   }
 
   const permission = await getLocationPermission();
@@ -177,7 +177,7 @@ export async function startTracking(userId: string): Promise<boolean> {
     trackingSubscription = await Location.watchPositionAsync(
       {
         accuracy: Location.Accuracy.High,
-        distanceInterval: 5,
+        distanceInterval: 20,
         timeInterval: 5000,
       },
       (position) => {
@@ -188,6 +188,9 @@ export async function startTracking(userId: string): Promise<boolean> {
         };
 
         trackingReadings.push(reading);
+        void appendOnTheGoReadings(userId, [reading]).catch((error) => {
+          console.error('Could not save On-the-Go foreground reading:', error);
+        });
 
         // Save using the owner who started this tracking session.
         void saveGPSReadings([reading], userId).catch((error) => {
@@ -238,20 +241,21 @@ export async function startBackgroundTracking(): Promise<boolean> {
     const alreadyTracking =
       await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
 
-    if (alreadyTracking) {
-      return false;
-    }
+      if (alreadyTracking) {
+        return true;
+      }
 
-    const granted = await requestBackgroundLocationPermission();
+    const foreground = await Location.getForegroundPermissionsAsync();
+    const background = await Location.getBackgroundPermissionsAsync();
 
-    if (!granted) {
+    if (!foreground.granted || !background.granted) {
       return false;
     }
 
 
     await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
       accuracy: Location.Accuracy.High,
-      distanceInterval: 5,
+      distanceInterval: 20,
       pausesUpdatesAutomatically: false,
       showsBackgroundLocationIndicator: true,
     });

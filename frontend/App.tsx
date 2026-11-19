@@ -14,6 +14,8 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import Constants from 'expo-constants';
 
+import * as Location from 'expo-location';
+
 import { colors } from './src/theme';
 
 import ActionButton from './src/components/ActionButton';
@@ -233,9 +235,25 @@ export default function App() {
   }, []);
 
   const setTrackingEnabled = useCallback(async (enabled: boolean) => {
-    await savePrivacySettings({ location_tracking_enabled: enabled });
-  }, [savePrivacySettings]);
+    if (enabled) {
+      const foreground = await Location.getForegroundPermissionsAsync();
 
+      if (!foreground.granted) {
+        const requested = await Location.requestForegroundPermissionsAsync();
+
+        if (!requested.granted) {
+          setTrackingStatus('Location permission is required to enable tracking.');
+          return;
+        }
+      }
+    }
+
+    await savePrivacySettings({ location_tracking_enabled: enabled });
+
+    if (!enabled) {
+      setTrackingStatus(null);
+    }
+  }, [savePrivacySettings]);
   // Restore Supabase login session
 
   useEffect(() => {
@@ -462,65 +480,10 @@ useEffect(() => {
 }, [step]);
 
 
-    // Automatically start foreground GPS tracking in Expo Go
-    useEffect(() => {
-      if (
-        step !== 'app' ||
-        Constants.appOwnership !== 'expo' ||
-        !gpsOwnerId ||
-        isLocationTrackingEnabled === undefined
-      ) {
-        return;
-      }
-
-      let cancelled = false;
-
-      if (!isLocationTrackingEnabled) {
-        stopTracking();
-        setTrackingStatus(null);
-        return () => {
-          cancelled = true;
-          stopTracking();
-        };
-      }
-
-      const startAutomaticForegroundTracking = async () => {
-        try {
-          const started = await startTracking(gpsOwnerId);
-
-          if (cancelled) {
-            if (started) stopTracking();
-            return;
-          }
-
-          if (started) {
-            setTrackingStatus(null);
-            console.log('Automatic foreground GPS tracking started.');
-          } else {
-            setTrackingStatus('Could not start tracking. Check location permission.');
-            console.warn('Automatic foreground GPS tracking could not start.');
-          }
-        } catch (error) {
-          setTrackingStatus(error instanceof Error ? error.message : 'Failed to start GPS tracking.');
-          console.warn('Automatic foreground GPS tracking failed:', error);
-        }
-      };
-
-      void startAutomaticForegroundTracking();
-
-      return () => {
-        cancelled = true;
-        stopTracking();
-      };
-    }, [step, gpsOwnerId, isLocationTrackingEnabled]);
-
-  // Automatically start background GPS tracking
-
-// Automatically start background GPS tracking
+// Automatically start GPS tracking based on location permissions
 useEffect(() => {
   if (
     step !== 'app' ||
-    Constants.appOwnership === 'expo' ||
     !gpsOwnerId ||
     isLocationTrackingEnabled === undefined
   ) {
@@ -531,35 +494,98 @@ useEffect(() => {
 
   const startAutomaticTracking = async () => {
     try {
+      // If tracking is disabled, stop everything
       if (!isLocationTrackingEnabled) {
+        stopTracking();
         await stopBackgroundTracking();
-        setTrackingStatus(null);
+
+        if (!cancelled) {
+          setTrackingStatus(null);
+        }
+
         return;
       }
 
-      const alreadyTracking = await isBackgroundTracking();
+      // Check both foreground and background permissions
+      const foreground = await Location.getForegroundPermissionsAsync();
+
+      const background =
+        Constants.appOwnership !== 'expo'
+          ? await Location.getBackgroundPermissionsAsync()
+          : null;
+
       if (cancelled) return;
 
-      if (!alreadyTracking) {
-        const started = await startBackgroundTracking();
+      // CASE 1: Both permissions granted (Always)
+      if (foreground.granted && background?.granted) {
+        // Stop foreground tracking before starting background tracking
+        stopTracking();
 
-        if (cancelled && started) {
-          await stopBackgroundTracking();
+        const alreadyTracking = await isBackgroundTracking();
+
+        if (cancelled) return;
+
+        const started = alreadyTracking
+          ? true
+          : await startBackgroundTracking();
+
+        if (cancelled) return;
+
+        if (started) {
+          setTrackingStatus(null);
+          console.log('Automatic background GPS tracking started.');
+        } else {
+          setTrackingStatus('Could not start background GPS tracking.');
+          console.warn('Automatic background GPS tracking could not start.');
+        }
+
+        return;
+      }
+
+      // CASE 2: Only foreground permission granted (While Using)
+      if (foreground.granted) {
+        // Stop background tracking before starting foreground tracking
+        await stopBackgroundTracking();
+
+        if (cancelled) return;
+
+        const started = await startTracking(gpsOwnerId);
+
+        if (cancelled) {
+          if (started) stopTracking();
           return;
         }
 
-        if (!started) {
-          setTrackingStatus('Could not start tracking. Check background location permission.');
-          console.warn('Automatic GPS tracking could not start.');
-        } else {
+        if (started) {
           setTrackingStatus(null);
+          console.log('Automatic foreground GPS tracking started.');
+        } else {
+          setTrackingStatus('Could not start foreground GPS tracking.');
+          console.warn('Automatic foreground GPS tracking could not start.');
         }
-      } else {
-        setTrackingStatus(null);
+
+        return;
       }
+
+      // CASE 3: No location permission
+      stopTracking();
+      await stopBackgroundTracking();
+
+      if (!cancelled) {
+        setTrackingStatus('Location permission is not granted.');
+        console.warn('GPS tracking could not start: no location permission.');
+      }
+
     } catch (error) {
-      setTrackingStatus(error instanceof Error ? error.message : 'Failed to start GPS tracking.');
       console.warn('Automatic GPS tracking failed:', error);
+
+      if (!cancelled) {
+        setTrackingStatus(
+          error instanceof Error
+            ? error.message
+            : 'Failed to start GPS tracking.'
+        );
+      }
     }
   };
 
@@ -567,6 +593,7 @@ useEffect(() => {
 
   return () => {
     cancelled = true;
+    stopTracking();
   };
 }, [step, gpsOwnerId, isLocationTrackingEnabled]);
   // Automatically upload saved GPS readings to Supabase
@@ -722,6 +749,7 @@ useEffect(() => {
             <Tab.Screen name="On-The-Go">
               {() => (
                 <RouteScreen
+                  userId={gpsOwnerId}
                   isTracking={isLocationTrackingEnabled ?? false}
                   isSettingsLoading={isPrivacySettingsLoading || !privacySettings}
                   trackingStatus={trackingStatus}
