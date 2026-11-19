@@ -11,6 +11,10 @@ import {
   sendFriendRequest,
 } from '../src/services/FriendService';
 import { supabase } from '../src/lib/supabase';
+jest.mock('../src/screens/FriendMapScreen', () => ({
+  __esModule: true,
+  default: () => null,
+}));
 
 jest.mock('../src/lib/supabase', () => ({ supabase: {} }));
 jest.mock('../src/services/FriendService', () => ({

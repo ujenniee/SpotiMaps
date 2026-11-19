@@ -9,6 +9,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import UsernameSection from '../components/UsernameSection';
 import type { PrivacySettings, PrivacySettingsUpdate } from '../services/PrivacySettingsService';
 import { colors } from '../theme';
 
@@ -22,14 +23,11 @@ type Props = {
   onLogout: () => Promise<void>;
 };
 
-// Light grey panels from the Settings Figma frame
 const PANEL_COLOR = '#A3A3A3';
 const SELECTED_COLOR = '#6B6F80';
 
-// TODO: replace with the real Spotify name once Harley's connection check exists
 const SPOTIFY_DISPLAY_NAME = 'harley.z';
 
-// TODO: replace with the user's real places from Supabase
 const PLACES = [
   'Bill & Melinda Gates Center',
   'Paul G. Allen Center of Computer Science',
@@ -86,6 +84,7 @@ export default function PrivacyScreen({
     <SafeAreaView edges={['top']} style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.title}>Settings</Text>
+        <UsernameSection />
 
         {/* Spotify connection */}
         <Text style={styles.sectionHeader}>SPOTIFY</Text>
