@@ -1,6 +1,11 @@
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import PrivacyScreen from '../src/screens/PrivacyScreen';
 
+jest.mock('../src/components/UsernameSection', () => ({
+  __esModule: true,
+  default: () => null,
+}));
+
 const settings = {
   location_tracking_enabled: true,
   map_visibility: 'private' as const,
