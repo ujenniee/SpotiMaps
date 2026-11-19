@@ -2,8 +2,12 @@ import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import MapView, { Polyline, type Region } from 'react-native-maps';
 import { colors, getGenreColor } from '../theme';
-import { startOnTheGoSession, endOnTheGoSession, getActiveOnTheGoSession,}
-from '../services/OnTheGoService';
+import {
+  startOnTheGoSession,
+  endOnTheGoSession,
+  getActiveOnTheGoSession,
+  type OnTheGoSession,
+} from '../services/OnTheGoService';
 import type { GPSReading } from '../services/LocationService';
 type RouteSegment = {
   id: string;
@@ -74,11 +78,14 @@ export default function RouteScreen({
   const [isTripActive, setIsTripActive] = useState(false);
   const [isTripLoading, setIsTripLoading] = useState(true);
   const [routeReadings, setRouteReadings] = useState<GPSReading[]>([]);
+  const [completedTrip, setCompletedTrip] =
+  useState<OnTheGoSession | null>(null);
   useEffect(() => {
     let cancelled = false;
 
     setIsTripLoading(true);
     setIsTripActive(false);
+    setCompletedTrip(null);
 
     const loadActiveTrip = async () => {
       if (!userId) {
@@ -155,15 +162,16 @@ export default function RouteScreen({
 
     try {
       if (isTripActive) {
-        const completedTrip = await endOnTheGoSession(userId);
-
+        const finishedTrip = await endOnTheGoSession(userId);
+            
         setIsTripActive(false);
-        setRouteReadings(completedTrip.readings);
-
+        setRouteReadings(finishedTrip.readings);
+        setCompletedTrip(finishedTrip);
+            
         console.log(
-          `Trip completed with ${completedTrip.readings.length} GPS readings.`
+          `Trip completed with ${finishedTrip.readings.length} GPS readings.`
         );
-      } else {
+      }else {
         if (!isTracking) {
           throw new Error(
             'Enable location tracking in Settings before starting a trip.'
@@ -172,6 +180,7 @@ export default function RouteScreen({
 
         await startOnTheGoSession(userId);
 
+        setCompletedTrip(null);
         setRouteReadings([]);
         setIsTripActive(true);
 
@@ -187,7 +196,15 @@ export default function RouteScreen({
       setIsSaving(false);
     }
   };
-
+  const tripDurationMinutes =
+    completedTrip && completedTrip.endedAt !== null
+      ? Math.max(
+          0,
+          Math.round(
+            (completedTrip.endedAt - completedTrip.startedAt) / 60000
+          )
+        )
+      : 0;
   return (
     <View style={styles.container}>
 <MapView
@@ -208,36 +225,86 @@ export default function RouteScreen({
   )}
 </MapView>
 
-      <View style={styles.bottomArea} pointerEvents="box-none">
-        <Pressable
-          style={({ pressed }) => [
-            styles.trackButton,
-            isTripActive && styles.trackButtonActive,
-            pressed && styles.pressed,
-            (isSettingsLoading || isSaving || isTripLoading || !userId) && styles.disabled,
-          ]}
-          onPress={() => void toggleTracking()}
-          disabled={isSettingsLoading || isSaving || isTripLoading || !userId}
-          accessibilityRole="button"
-          accessibilityState={{
-            disabled: isSettingsLoading || isSaving || isTripLoading || !userId,
-          }}
-        >
-          <Text
-            style={[
-              styles.trackButtonText,
-              isTripActive && styles.trackButtonTextActive,
+<View style={styles.bottomArea} pointerEvents="box-none">
+        {completedTrip ? (
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryTitle}>Trip Complete!</Text>
+
+            <Text style={styles.summaryDate}>
+              {new Date(completedTrip.startedAt).toLocaleDateString()}
+            </Text>
+
+            <View style={styles.summaryStats}>
+              <View style={styles.stat}>
+                <Text style={styles.statValue}>
+                  {tripDurationMinutes} min
+                </Text>
+                <Text style={styles.statLabel}>Duration</Text>
+              </View>
+
+              <View style={styles.stat}>
+                <Text style={styles.statValue}>
+                  {completedTrip.readings.length}
+                </Text>
+                <Text style={styles.statLabel}>GPS Points</Text>
+              </View>
+            </View>
+
+            <Pressable
+              style={styles.doneButton}
+              onPress={() => setCompletedTrip(null)}
+              accessibilityRole="button"
+            >
+              <Text style={styles.doneButtonText}>Done</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <Pressable
+            style={({ pressed }) => [
+              styles.trackButton,
+              isTripActive && styles.trackButtonActive,
+              pressed && styles.pressed,
+              (isSettingsLoading ||
+                isSaving ||
+                isTripLoading ||
+                !userId) &&
+                styles.disabled,
             ]}
+            onPress={() => void toggleTracking()}
+            disabled={
+              isSettingsLoading ||
+              isSaving ||
+              isTripLoading ||
+              !userId
+            }
+            accessibilityRole="button"
+            accessibilityState={{
+              disabled:
+                isSettingsLoading ||
+                isSaving ||
+                isTripLoading ||
+                !userId,
+            }}
           >
-            {isSaving || isTripLoading
-              ? 'Loading…'
-              : isTripActive
-                ? 'End Tracking'
-                : 'Start Tracking'}
-          </Text>
-        </Pressable>
+            <Text
+              style={[
+                styles.trackButtonText,
+                isTripActive && styles.trackButtonTextActive,
+              ]}
+            >
+              {isSaving || isTripLoading
+                ? 'Loading…'
+                : isTripActive
+                  ? 'End Tracking'
+                  : 'Start Tracking'}
+            </Text>
+          </Pressable>
+        )}
+
         {error || trackingStatus ? (
-          <Text style={styles.statusText}>{error ?? trackingStatus}</Text>
+          <Text style={styles.statusText}>
+            {error ?? trackingStatus}
+          </Text>
         ) : null}
       </View>
     </View>
@@ -285,5 +352,62 @@ const styles = StyleSheet.create({
     color: colors.error,
     backgroundColor: colors.white,
     textAlign: 'center',
+  },
+  summaryCard: {
+    backgroundColor: colors.white,
+    borderRadius: 20,
+    padding: 24,
+    marginHorizontal: 20,
+    width: '90%',
+    alignItems: 'center',
+  },
+
+  summaryTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#191414',
+    marginBottom: 8,
+  },
+
+  summaryDate: {
+    fontSize: 14,
+    color: '#666666',
+    marginBottom: 20,
+  },
+
+  summaryStats: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    width: '100%',
+    marginBottom: 24,
+  },
+
+  stat: {
+    alignItems: 'center',
+  },
+
+  statValue: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#191414',
+  },
+
+  statLabel: {
+    fontSize: 13,
+    color: '#666666',
+    marginTop: 4,
+  },
+
+  doneButton: {
+    backgroundColor: colors.spotifyGreen,
+    paddingVertical: 14,
+    paddingHorizontal: 60,
+    borderRadius: 999,
+  },
+
+  doneButtonText: {
+    color: '#191414',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 });
