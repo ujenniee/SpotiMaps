@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -8,11 +8,11 @@ import {
   Alert,
 } from 'react-native';
 
-import { connectSpotifyAccount } from '../services/SpotifyAuthService';
+import { connectSpotifyAccount, type SpotifyConnection } from '../services/SpotifyAuthService';
 
 
 type SpotifyConnectScreenProps = {
-  onConnected: () => void;
+  onConnected: (connection: SpotifyConnection) => void;
   onLogout: () => Promise<void>;
 };
 
@@ -34,17 +34,32 @@ export default function SpotifyConnectScreen({
   onLogout,
 }: SpotifyConnectScreenProps) {
   const [loading, setLoading] = useState(false);
+  const isMounted = useRef(true);
+  const attemptId = useRef(0);
+  const isConnecting = useRef(false);
+
+  useEffect(() => {
+    isMounted.current = true;
+    return () => {
+      isMounted.current = false;
+      attemptId.current += 1;
+    };
+  }, []);
 
   const handleConnect = async () => {
-    if (loading) return;
+    if (!isMounted.current || isConnecting.current) return;
 
+    const attempt = ++attemptId.current;
+    const isCurrentAttempt = () => isMounted.current && attempt === attemptId.current;
+    isConnecting.current = true;
     setLoading(true);
 
     try {
       const result = await connectSpotifyAccount();
+      if (!isCurrentAttempt()) return;
 
       if (result?.success) {
-        onConnected();
+        onConnected(result);
       } else {
         Alert.alert(
           'Spotify Sign-In Canceled',
@@ -53,6 +68,7 @@ export default function SpotifyConnectScreen({
         );
       }
     } catch (error) {
+      if (!isCurrentAttempt()) return;
       const errorType = getSpotifyErrorType(error);
       if (errorType === 'session') {
         Alert.alert(
@@ -63,13 +79,7 @@ export default function SpotifyConnectScreen({
             {
               text: 'Log In',
               onPress: () => {
-                void onLogout().catch((logoutError) => {
-                  const message =
-                    logoutError instanceof Error
-                      ? logoutError.message
-                      : 'Something went wrong logging out.';
-                  Alert.alert('Log Out Failed', message);
-                });
+                void handleLogout();
               },
             },
           ],
@@ -98,14 +108,21 @@ export default function SpotifyConnectScreen({
         );
       }
     } finally {
-      setLoading(false);
+      if (isCurrentAttempt()) {
+        isConnecting.current = false;
+        setLoading(false);
+      }
     }
   };
 
   const handleLogout = async () => {
+    attemptId.current += 1;
+    isConnecting.current = false;
+    if (isMounted.current) setLoading(false);
     try {
       await onLogout();
     } catch (error) {
+      if (!isMounted.current) return;
       const message =
         error instanceof Error ? error.message : 'Something went wrong logging out.';
       Alert.alert('Log Out Failed', message);
@@ -127,7 +144,7 @@ export default function SpotifyConnectScreen({
           styles.button,
           loading && styles.disabledButton,
         ]}
-        onPress={handleConnect}
+        onPress={() => void handleConnect()}
         disabled={loading}
       >
         {loading ? (
