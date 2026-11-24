@@ -83,20 +83,32 @@ export async function fetchRecentlyPlayed(accessToken: string, fetcher: typeof f
   return { plays, skippedCount };
 }
 
-/** Append recent plays to the signed-in Supabase user's history without duplicates. */
+/** Append recent plays without duplicates, retaining the token's expected SpotiMaps owner. */
 export async function syncListeningHistory(
   client: SupabaseClient<Database>,
   spotifyAccessToken: string,
   fetcher: typeof fetch = fetch,
+  expectedUserId?: string,
 ) {
   const { data: auth, error: authError } = await client.auth.getUser();
   if (authError || !auth.user) {
     throw new Error('Sign in to SpotiMaps before syncing listening history.');
   }
+  const userId = auth.user.id;
+  if (expectedUserId !== undefined && userId !== expectedUserId) {
+    throw new Error('SpotiMaps account changed before Spotify sync. No songs were saved.');
+  }
   const { plays, skippedCount } = await fetchRecentlyPlayed(spotifyAccessToken, fetcher);
+
+  // Authorization can change while Spotify responds. Never adopt a new owner
+  // for an existing token; writes also retain userId so RLS protects later switches.
+  const { data: currentAuth, error: currentError } = await client.auth.getUser();
+  if (currentError || currentAuth.user?.id !== userId) {
+    throw new Error('SpotiMaps account changed or could not be verified during Spotify sync. No songs were saved.');
+  }
   let insertedCount = 0;
   if (plays.length > 0) {
-    const rows = plays.map((play) => ({ ...play, user_id: auth.user.id }));
+    const rows = plays.map((play) => ({ ...play, user_id: userId }));
     const { data, error } = await client.from('listening_history')
       .upsert(rows, { onConflict: 'user_id,track_id,listened_at', ignoreDuplicates: true })
       .select('id');
