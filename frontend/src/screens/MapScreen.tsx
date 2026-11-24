@@ -17,6 +17,7 @@ const UW_REGION: Region = {
   latitudeDelta: 0.012,
   longitudeDelta: 0.012,
 };
+
 function getListenedGenreFamilies(places: MapPlace[]): string[] {
   const playsByGenre = new Map<string, number>();
   places.forEach((place) => {
@@ -29,59 +30,101 @@ function getListenedGenreFamilies(places: MapPlace[]): string[] {
     .sort((a, b) => b[1] - a[1])
     .map(([genre]) => genre);
 }
-export default function MapScreen() {
+
+type Props = {
+  refreshVersion?: number;
+  syncError?: string | null;
+  onReconnectSpotify?: () => void;
+  isReconnectingSpotify?: boolean;
+};
+
+export default function MapScreen({
+  refreshVersion = 0,
+  syncError = null,
+  onReconnectSpotify,
+  isReconnectingSpotify = false,
+}: Props) {
   const mapRef = useRef<MapView>(null);
   const regionRef = useRef<Region>(UW_REGION);
-  const isMountedRef = useRef(true);
+  const isMountedRef = useRef(false);
+  const isLoadingPlacesRef = useRef(false);
+  const pendingRefreshRef = useRef(false);
+  const mountVersionRef = useRef(0);
+  const hasFitInitialPlacesRef = useRef(false);
   const [places, setPlaces] = useState<MapPlace[]>([]);
   const [selectedPlace, setSelectedPlace] = useState<MapPlace | null>(null);
   const [isCardExpanded, setIsCardExpanded] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
   const [hasLoadError, setHasLoadError] = useState(false);
   const [isMapReady, setIsMapReady] = useState(false);
-  const [isShareModalVisible, setIsShareModalVisible] = useState(false);
+  // Keep an open share editor stable while automatic refreshes update the map.
+  const [shareSnapshot, setShareSnapshot] = useState<{
+    places: MapPlace[];
+    initialPlaceId: string | null;
+  } | null>(null);
 
   // Makes the card slide smoothly instead of jumping
   const animateCard = () => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
   };
 
-  // Loads the user's places. Also used by the Try again button.
+  useEffect(() => {
+    isMountedRef.current = true;
+
+    return () => {
+      isMountedRef.current = false;
+      pendingRefreshRef.current = false;
+      mountVersionRef.current += 1;
+    };
+  }, []);
+
+  // Automatic refresh and manual retry share one queue, without hiding saved data.
   const loadPlaces = useCallback(async () => {
-    setIsLoading(true);
-    setHasLoadError(false);
+    if (!isMountedRef.current) return;
+    pendingRefreshRef.current = true;
+    if (isLoadingPlacesRef.current) {
+      return;
+    }
+
+    isLoadingPlacesRef.current = true;
     try {
-      const nextPlaces = await fetchMapPlaces(supabase);
-      if (isMountedRef.current) {
-        setPlaces(nextPlaces);
-        // The Song Card only opens when the user taps a marker
-        setSelectedPlace(null);
-      }
-    } catch (error) {
-      console.warn('Could not load map data:', error);
-      if (isMountedRef.current) {
-        setHasLoadError(true);
+      // Coalesce refreshes that arrive during a request into one follow-up load.
+      while (isMountedRef.current && pendingRefreshRef.current) {
+        pendingRefreshRef.current = false;
+        const mountVersion = mountVersionRef.current;
+        try {
+          const nextPlaces = await fetchMapPlaces(supabase);
+          if (isMountedRef.current && mountVersion === mountVersionRef.current) {
+            setPlaces(nextPlaces);
+            // Cards open only on marker taps; refresh an open card by its location ID.
+            setSelectedPlace((current) => nextPlaces.find((place) => place.id === current?.id) ?? null);
+            setHasLoadError(false);
+          }
+        } catch (error) {
+          if (isMountedRef.current && mountVersion === mountVersionRef.current) {
+            console.warn('Could not load map data:', error);
+            setHasLoadError(true);
+          }
+        } finally {
+          if (isMountedRef.current && mountVersion === mountVersionRef.current) {
+            setIsLoading(false);
+          }
+        }
       }
     } finally {
-      if (isMountedRef.current) {
-        setIsLoading(false);
-      }
+      isLoadingPlacesRef.current = false;
     }
   }, []);
 
   useEffect(() => {
-    isMountedRef.current = true;
     void loadPlaces();
-
-    return () => {
-      isMountedRef.current = false;
-    };
-  }, [loadPlaces]);
+  }, [loadPlaces, refreshVersion]);
 
   useEffect(() => {
-    if (!isMapReady || isLoading || places.length === 0) {
+    if (hasFitInitialPlacesRef.current || !isMapReady || isLoading || places.length === 0) {
       return;
     }
+    hasFitInitialPlacesRef.current = true;
 
     const coordinates = places.map(({ latitude, longitude }) => ({ latitude, longitude }));
     const first = coordinates[0];
@@ -188,7 +231,7 @@ export default function MapScreen() {
           </View>
           {places.length > 0 && (
             <Pressable
-              onPress={() => setIsShareModalVisible(true)}
+              onPress={() => setShareSnapshot({ places, initialPlaceId: selectedPlace?.id ?? null })}
               style={({ pressed }) => [styles.shareButton, pressed && styles.pressed]}
               accessibilityRole="button"
               accessibilityLabel="Create a shareable image of your map"
@@ -208,6 +251,26 @@ export default function MapScreen() {
           </View>
         ) : null}
 
+        {syncError || onReconnectSpotify ? (
+          <View style={styles.statusCard} accessibilityRole="alert">
+            <Text style={styles.statusBody}>
+              {syncError || 'Reconnect Spotify to import your recent listening history.'}
+            </Text>
+            {onReconnectSpotify ? (
+              <Pressable
+                onPress={onReconnectSpotify}
+                disabled={isReconnectingSpotify}
+                style={styles.reconnectButton}
+                accessibilityRole="button"
+              >
+                <Text style={styles.reconnectText}>
+                  {isReconnectingSpotify ? 'Connecting…' : 'Reconnect Spotify'}
+                </Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
+
         {hasLoadError ? (
           <View style={styles.statusCard} accessibilityRole="alert">
             <Text style={styles.statusTitle}>Couldn’t load your map</Text>
@@ -215,7 +278,11 @@ export default function MapScreen() {
               Something went wrong loading your listening history. Please try again.
             </Text>
             <Pressable
-              onPress={() => void loadPlaces()}
+              onPress={() => {
+                setIsLoading(true);
+                setHasLoadError(false);
+                void loadPlaces();
+              }}
               style={({ pressed }) => [styles.retryButton, pressed && styles.pressed]}
               accessibilityRole="button"
             >
@@ -251,10 +318,10 @@ export default function MapScreen() {
       </View>
 
       <MapShareModal
-        visible={isShareModalVisible}
-        places={places}
-        initialPlaceId={selectedPlace?.id ?? null}
-        onClose={() => setIsShareModalVisible(false)}
+        visible={shareSnapshot !== null}
+        places={shareSnapshot?.places ?? places}
+        initialPlaceId={shareSnapshot?.initialPlaceId ?? null}
+        onClose={() => setShareSnapshot(null)}
       />
     </View>
   );
@@ -405,5 +472,17 @@ const styles = StyleSheet.create({
   retryText: {
     fontSize: 14,
     color: colors.text,
+  },
+  reconnectButton: {
+    alignSelf: 'center',
+    marginTop: 8,
+    borderRadius: 6,
+    backgroundColor: colors.sage,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  reconnectText: {
+    color: colors.text,
+    fontSize: 13,
   },
 });

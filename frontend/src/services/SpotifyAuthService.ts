@@ -21,6 +21,7 @@ export type SpotifyTokens = {
     accessToken: string;
     refreshToken?: string;
     expiresIn?: number;
+    expiresAt?: number | null;
   };
   
   export async function signInWithSpotify(): Promise<SpotifyTokens | null> {
@@ -46,6 +47,7 @@ export type SpotifyTokens = {
       throw new Error('Spotify authorization code or PKCE verifier is missing.');
     }
   
+    const exchangeStartedAt = Date.now();
     const tokenResponse = await AuthSession.exchangeCodeAsync(
       {
         clientId,
@@ -62,6 +64,11 @@ export type SpotifyTokens = {
       accessToken: tokenResponse.accessToken,
       refreshToken: tokenResponse.refreshToken,
       expiresIn: tokenResponse.expiresIn,
+      expiresAt: typeof tokenResponse.expiresIn === 'number'
+        && Number.isFinite(tokenResponse.expiresIn)
+        && tokenResponse.expiresIn >= 0
+        ? exchangeStartedAt + tokenResponse.expiresIn * 1000
+        : null,
     };
   }
   
@@ -90,8 +97,15 @@ export type SpotifyTokens = {
     success: true;
     spotifyUserId: string;
   };
+
+  /** Spotify credentials stay in memory and belong to this SpotiMaps user. */
+  export type SpotifyConnection = ConnectSpotifyResult & {
+    userId: string;
+    accessToken: string;
+    expiresAt: number | null;
+  };
   
-  export async function connectSpotifyAccount(): Promise<ConnectSpotifyResult | null> {
+  export async function connectSpotifyAccount(): Promise<SpotifyConnection | null> {
   
     // 1. Check that the user is logged into SpotiMaps
     const {
@@ -110,6 +124,18 @@ export type SpotifyTokens = {
     if (!tokens) {
       return null;
     }
+
+    const assertSameUser = async () => {
+      const { data: currentAuth, error: currentError } = await supabase.auth.getUser();
+      if (currentError || currentAuth.user?.id !== user.id) {
+        throw new Error(
+          'Your SpotiMaps account changed during Spotify authorization. Connect Spotify again.',
+        );
+      }
+    };
+
+    // Do not link credentials from an authorization started by another account.
+    await assertSameUser();
   
     // 3. Send Spotify token to our Supabase Edge Function
     const { data, error } =
@@ -130,7 +156,15 @@ export type SpotifyTokens = {
     if (!data?.success || !data.spotifyUserId) {
       throw new Error('Spotify connection was not confirmed.');
     }
+
+    // The account can also change while the backend confirms the connection.
+    await assertSameUser();
   
-    // 5. Return the successful connection
-    return data;
+    // 5. Return credentials only after the backend confirms the same user's link.
+    return {
+      ...data,
+      userId: user.id,
+      accessToken: tokens.accessToken,
+      expiresAt: tokens.expiresAt ?? null,
+    };
   }

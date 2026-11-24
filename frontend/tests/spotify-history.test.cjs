@@ -107,6 +107,73 @@ test('an empty Spotify history needs no database write', async () => {
   });
 });
 
+test('rejects a token owner mismatch before fetching Spotify or writing songs', async () => {
+  const client = {
+    auth: { getUser: async () => ({ data: { user: { id: 'user-b' } }, error: null }) },
+    from: () => assert.fail('An old token must not write to the new account'),
+    rpc: () => assert.fail('A rejected import must not request matching'),
+  };
+  await assert.rejects(
+    syncListeningHistory(client, 'token-a', async () => assert.fail('An old token must not fetch songs'), 'user-a'),
+    /account changed before Spotify sync/,
+  );
+});
+
+test('rejects account changes and logout while fetching Spotify before any database writes', async () => {
+  for (const nextUser of [{ id: 'user-b' }, null]) {
+    let user = { id: 'user-a' };
+    const client = {
+      auth: { getUser: async () => ({ data: { user }, error: null }) },
+      from: () => assert.fail('An account change must prevent database writes'),
+      rpc: () => assert.fail('An account change must prevent matching'),
+    };
+    const fetcher = async () => {
+      user = nextUser;
+      return reply([item]);
+    };
+    await assert.rejects(
+      syncListeningHistory(client, 'token-a', fetcher, 'user-a'),
+      /account changed or could not be verified/,
+    );
+  }
+});
+
+test('does not save songs if authentication cannot be verified after fetching', async () => {
+  let fetched = false;
+  const client = {
+    auth: { getUser: async () => ({
+      data: { user: { id: 'user-a' } },
+      error: fetched ? { message: 'Authentication unavailable' } : null,
+    }) },
+    from: () => assert.fail('Unverified authentication must prevent writes'),
+    rpc: () => assert.fail('Unverified authentication must prevent matching'),
+  };
+  await assert.rejects(syncListeningHistory(client, 'token-a', async () => {
+    fetched = true;
+    return reply([item]);
+  }, 'user-a'), /could not be verified/);
+});
+
+test('saves an explicitly owned import using the original user ID', async () => {
+  let authChecks = 0;
+  let writtenRows;
+  const client = {
+    auth: { getUser: async () => {
+      authChecks++;
+      return { data: { user: { id: 'user-a' } }, error: null };
+    } },
+    from: () => ({ upsert: (rows) => {
+      assert.equal(authChecks, 2, 'Verify the account again before saving');
+      writtenRows = rows;
+      return { select: async () => ({ data: [{ id: 'play-1' }], error: null }) };
+    } }),
+    rpc: async () => ({ data: [{}], error: null }),
+  };
+  const result = await syncListeningHistory(client, 'token-a', async () => reply([item]), 'user-a');
+  assert.equal(result.insertedCount, 1);
+  assert.equal(writtenRows[0].user_id, 'user-a');
+});
+
 test('keeps a successful Spotify upload when matching fails', async () => {
   const client = {
     auth: { getUser: async () => ({ data: { user: { id: 'user-a' } }, error: null }) },

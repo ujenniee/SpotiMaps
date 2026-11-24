@@ -1,5 +1,5 @@
 import { Alert } from 'react-native';
-import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import SpotifyConnectScreen from '../src/screens/SpotifyConnectScreen';
 import { connectSpotifyAccount } from '../src/services/SpotifyAuthService';
 
@@ -19,12 +19,14 @@ afterEach(() => {
 });
 
 async function renderScreen(onLogout = jest.fn(async () => undefined)) {
+  const onConnected = jest.fn();
   const screen = await render(
-    <SpotifyConnectScreen onConnected={jest.fn()} onLogout={onLogout} />,
+    <SpotifyConnectScreen onConnected={onConnected} onLogout={onLogout} />,
   );
   return {
     ...screen,
     onLogout,
+    onConnected,
   };
 }
 
@@ -41,6 +43,7 @@ test('shows a native informational alert when Spotify sign-in is canceled', asyn
       [{ text: 'OK' }],
     );
   });
+  expect(screen.onConnected).not.toHaveBeenCalled();
 });
 
 test('shows a native connection-failure alert', async () => {
@@ -59,6 +62,56 @@ test('shows a native connection-failure alert', async () => {
       ]),
     );
   });
+  expect(screen.onConnected).not.toHaveBeenCalled();
+});
+
+const connection = {
+  success: true as const,
+  spotifyUserId: 'spotify-user',
+  userId: 'spotimaps-user',
+  accessToken: 'spotify-access-token',
+  expiresAt: 1234567890000,
+};
+
+test('passes the confirmed Spotify session to the app', async () => {
+  mockConnectSpotifyAccount.mockResolvedValue(connection);
+  const screen = await renderScreen();
+
+  await fireEvent.press(screen.getByText('Connect with Spotify'));
+
+  await waitFor(() => expect(screen.onConnected).toHaveBeenCalledWith(connection));
+  expect(screen.onConnected).toHaveBeenCalledTimes(1);
+});
+
+test('ignores a Spotify authorization that finishes after the screen unmounts', async () => {
+  let finish!: (value: typeof connection) => void;
+  mockConnectSpotifyAccount.mockReturnValue(new Promise((resolve) => {
+    finish = resolve;
+  }));
+  const screen = await renderScreen();
+
+  await fireEvent.press(screen.getByText('Connect with Spotify'));
+  await screen.unmount();
+  await act(async () => finish(connection));
+
+  expect(screen.onConnected).not.toHaveBeenCalled();
+  expect(Alert.alert).not.toHaveBeenCalled();
+});
+
+test('ignores a pending Spotify authorization after logout starts', async () => {
+  let finish!: (value: typeof connection) => void;
+  mockConnectSpotifyAccount.mockReturnValue(new Promise((resolve) => {
+    finish = resolve;
+  }));
+  const screen = await renderScreen();
+
+  await fireEvent.press(screen.getByText('Connect with Spotify'));
+  await fireEvent.press(screen.getByText('Log Out'));
+  await act(async () => finish(connection));
+
+  expect(screen.onLogout).toHaveBeenCalledTimes(1);
+  expect(screen.onConnected).not.toHaveBeenCalled();
+  expect(Alert.alert).not.toHaveBeenCalled();
 });
 
 test('offers a login action when the SpotiMaps session is missing', async () => {
