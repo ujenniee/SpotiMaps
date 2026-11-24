@@ -2,12 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 import { LayoutAnimation, Pressable, StyleSheet, Text, View } from 'react-native';
 import MapView, { Marker, type Region } from 'react-native-maps';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { colors, getGenreColor } from '../theme';
 import { supabase } from '../lib/supabase';
 import type { MapPlace } from '../data/mockData';
 import { fetchMapPlaces } from '../services/MapDataService';
-import { getPresentGenreFamilies, getTopGenre, getTotalPlays } from '../utils/placeStats';
+import { getMarkerGenreFamilies, getTopGenre, getTotalPlays } from '../utils/placeStats';
 import SongCardScreen from './SongCardScreen';
+import MapShareModal from '../components/MapShareModal';
 
 // Starting view: centered on the UW campus
 const UW_REGION: Region = {
@@ -26,6 +28,7 @@ export default function MapScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isMapReady, setIsMapReady] = useState(false);
+  const [isShareModalVisible, setIsShareModalVisible] = useState(false);
 
   // Makes the card slide smoothly instead of jumping
   const animateCard = () => {
@@ -100,7 +103,7 @@ export default function MapScreen() {
       250,
     );
   };
-  const presentGenres = getPresentGenreFamilies(places);
+  const presentGenres = getMarkerGenreFamilies(places);
 
   return (
     <View style={styles.container}>
@@ -143,14 +146,27 @@ export default function MapScreen() {
           </View>
         ) : null}
 
-        <View style={styles.zoomButtons}>
-          <Pressable style={styles.zoomButton} onPress={() => zoom(0.5)} accessibilityLabel="Zoom in">
-            <Text style={styles.zoomText}>+</Text>
-          </Pressable>
-          <View style={styles.zoomDivider} />
-          <Pressable style={styles.zoomButton} onPress={() => zoom(2)} accessibilityLabel="Zoom out">
-            <Text style={styles.zoomText}>−</Text>
-          </Pressable>
+        <View style={styles.mapControls}>
+          <View style={styles.zoomButtons}>
+            <Pressable style={styles.zoomButton} onPress={() => zoom(0.5)} accessibilityLabel="Zoom in">
+              <Text style={styles.zoomText}>+</Text>
+            </Pressable>
+            <View style={styles.zoomDivider} />
+            <Pressable style={styles.zoomButton} onPress={() => zoom(2)} accessibilityLabel="Zoom out">
+              <Text style={styles.zoomText}>−</Text>
+            </Pressable>
+          </View>
+          {places.length > 0 && (
+            <Pressable
+              onPress={() => setIsShareModalVisible(true)}
+              style={({ pressed }) => [styles.shareButton, pressed && styles.pressed]}
+              accessibilityRole="button"
+              accessibilityLabel="Create a shareable image of your map"
+            >
+              <MaterialCommunityIcons name="share-variant" size={17} color={colors.text} />
+              <Text style={styles.shareButtonText}>Share map</Text>
+            </Pressable>
+          )}
         </View>
       </SafeAreaView>
 
@@ -182,6 +198,12 @@ export default function MapScreen() {
           />
         </View>
       ) : null}
+      <MapShareModal
+        visible={isShareModalVisible}
+        places={places}
+        initialPlaceId={selectedPlace?.id ?? null}
+        onClose={() => setIsShareModalVisible(false)}
+      />
     </View>
   );
 }
@@ -222,6 +244,10 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 10,
   },
+  mapControls: {
+    alignItems: 'flex-end',
+    marginTop: 8,
+  },
   legendRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -238,7 +264,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   zoomButtons: {
-    marginTop: 8,
     backgroundColor: colors.white,
     borderRadius: 6,
     overflow: 'hidden',
@@ -256,6 +281,25 @@ const styles = StyleSheet.create({
   zoomDivider: {
     height: 1,
     backgroundColor: colors.input,
+  },
+  shareButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 8,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    backgroundColor: colors.white,
+    elevation: 3,
+  },
+  shareButtonText: {
+    color: colors.text,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  pressed: {
+    opacity: 0.7,
   },
   bottomSheet: {
     position: 'absolute',
