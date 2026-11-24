@@ -139,5 +139,89 @@ export async function syncListeningHistory(
     // Saving succeeded; retrying sync is safe and will request matching again.
     matchingError = error instanceof Error ? error.message : 'Could not request song-location matching.';
   }
+  // Genre enrichment is best-effort and must not interrupt Spotify or GPS syncing.
+  try {
+    await enrichMissingGenre(client);
+  } catch (error) {
+    console.warn('Genre enrichment skipped:', error);
+  }
   return { fetchedCount: plays.length, insertedCount, skippedCount, matchingError };
+}
+/**
+ * Find one listening-history entry without a genre
+ * and ask our Edge Function to populate it.
+ */
+export async function enrichMissingGenre(
+  client: SupabaseClient<Database>,
+) {
+  const { data: auth, error: authError } = await client.auth.getUser();
+
+  if (authError || !auth.user) {
+    throw new Error('Sign in to SpotiMaps before detecting genres.');
+  }
+
+  // Find up to 5 songs missing genres.
+  const { data: songs, error: songsError } = await client
+    .from('listening_history')
+    .select('id, title, artist')
+    .eq('user_id', auth.user.id)
+    .or('genre.is.null,genre.eq.""')
+    .order('listened_at', { ascending: false })
+    .limit(5);
+
+  if (songsError) {
+    throw new Error(songsError.message);
+  }
+
+  if (!songs || songs.length === 0) {
+    console.log('GENRE: All songs already have genres.');
+    return { processed: 0, results: [] };
+  }
+
+  console.log(`GENRE: Processing ${songs.length} songs.`);
+
+  const results = [];
+
+  // Process sequentially to avoid simultaneous MusicBrainz requests.
+  for (const song of songs) {
+    try {
+      console.log(`GENRE: Looking up ${song.title} by ${song.artist}`);
+
+      const { data, error } = await client.functions.invoke('lookup-genre', {
+        body: {
+          listeningHistoryId: song.id,
+        },
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      results.push({
+        title: song.title,
+        artist: song.artist,
+        success: true,
+        data,
+      });
+
+      console.log(`GENRE: Result for ${song.title}:`, data);
+
+    } catch (error) {
+      console.warn(`GENRE: Failed for ${song.title}:`, error);
+
+      results.push({
+        title: song.title,
+        artist: song.artist,
+        success: false,
+      });
+    }
+
+    // Space out Edge Function calls.
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+
+  return {
+    processed: songs.length,
+    results,
+  };
 }
