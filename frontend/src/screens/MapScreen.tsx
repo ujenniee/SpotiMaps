@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { LayoutAnimation, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, LayoutAnimation, Pressable, StyleSheet, Text, View } from 'react-native';
 import MapView, { Marker, type Region } from 'react-native-maps';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -22,11 +22,12 @@ const UW_REGION: Region = {
 export default function MapScreen() {
   const mapRef = useRef<MapView>(null);
   const regionRef = useRef<Region>(UW_REGION);
+  const isMountedRef = useRef(true);
   const [places, setPlaces] = useState<MapPlace[]>([]);
   const [selectedPlace, setSelectedPlace] = useState<MapPlace | null>(null);
   const [isCardExpanded, setIsCardExpanded] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [hasLoadError, setHasLoadError] = useState(false);
   const [isMapReady, setIsMapReady] = useState(false);
   const [isShareModalVisible, setIsShareModalVisible] = useState(false);
 
@@ -35,33 +36,37 @@ export default function MapScreen() {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
   };
 
-  useEffect(() => {
-    let isMounted = true;
-
-    async function loadPlaces() {
-      try {
-        const nextPlaces = await fetchMapPlaces(supabase);
-        if (isMounted) {
-          setPlaces(nextPlaces);
-          setSelectedPlace(nextPlaces[0] ?? null);
-        }
-      } catch (error) {
-        if (isMounted) {
-          setLoadError(error instanceof Error ? error.message : 'Could not load map data.');
-        }
-      } finally {
-        if (isMounted) {
-          setIsLoading(false);
-        }
+  // Loads the user's places. Also used by the Try again button.
+  const loadPlaces = useCallback(async () => {
+    setIsLoading(true);
+    setHasLoadError(false);
+    try {
+      const nextPlaces = await fetchMapPlaces(supabase);
+      if (isMountedRef.current) {
+        setPlaces(nextPlaces);
+        // The Song Card only opens when the user taps a marker
+        setSelectedPlace(null);
+      }
+    } catch (error) {
+      console.warn('Could not load map data:', error);
+      if (isMountedRef.current) {
+        setHasLoadError(true);
+      }
+    } finally {
+      if (isMountedRef.current) {
+        setIsLoading(false);
       }
     }
+  }, []);
 
+  useEffect(() => {
+    isMountedRef.current = true;
     void loadPlaces();
 
     return () => {
-      isMounted = false;
+      isMountedRef.current = false;
     };
-  }, []);
+  }, [loadPlaces]);
 
   useEffect(() => {
     if (!isMapReady || isLoading || places.length === 0) {
@@ -103,7 +108,9 @@ export default function MapScreen() {
       250,
     );
   };
+
   const presentGenres = getMarkerGenreFamilies(places);
+  const isEmpty = !isLoading && !hasLoadError && places.length === 0;
 
   return (
     <View style={styles.container}>
@@ -144,7 +151,10 @@ export default function MapScreen() {
               </View>
             ))}
           </View>
-        ) : null}
+        ) : (
+          // Keeps the zoom buttons on the right when there's no legend
+          <View />
+        )}
 
         <View style={styles.mapControls}>
           <View style={styles.zoomButtons}>
@@ -170,20 +180,41 @@ export default function MapScreen() {
         </View>
       </SafeAreaView>
 
-      {isLoading || loadError || places.length === 0 ? (
-        <View style={styles.statusBanner} accessibilityRole="summary">
-          <Text style={styles.statusText}>
-            {isLoading
-              ? 'Loading your listening history…'
-              : loadError
-                ? loadError
-                : 'No matched listening data from the last 7 days. Save listening history and GPS samples to see places here.'}
-          </Text>
-        </View>
-      ) : null}
+      <View style={styles.bottomSheet} pointerEvents="box-none">
+        {isLoading ? (
+          <View style={styles.loadingPill}>
+            <ActivityIndicator color={colors.text} />
+            <Text style={styles.loadingText}>Loading your map…</Text>
+          </View>
+        ) : null}
 
-      {selectedPlace ? (
-        <View style={styles.bottomSheet}>
+        {hasLoadError ? (
+          <View style={styles.statusCard} accessibilityRole="alert">
+            <Text style={styles.statusTitle}>Couldn’t load your map</Text>
+            <Text style={styles.statusBody}>
+              Something went wrong loading your listening history. Please try again.
+            </Text>
+            <Pressable
+              onPress={() => void loadPlaces()}
+              style={({ pressed }) => [styles.retryButton, pressed && styles.pressed]}
+              accessibilityRole="button"
+            >
+              <Text style={styles.retryText}>Try again</Text>
+            </Pressable>
+          </View>
+        ) : null}
+
+        {isEmpty ? (
+          <View style={styles.statusCard}>
+            <Text style={styles.statusTitle}>Keep listening to build your map!</Text>
+            <Text style={styles.statusBody}>
+              Places show up here after you listen to music with location tracking on. Your map
+              shows the last 7 days.
+            </Text>
+          </View>
+        ) : null}
+
+        {selectedPlace ? (
           <SongCardScreen
             place={selectedPlace}
             isExpanded={isCardExpanded}
@@ -196,8 +227,9 @@ export default function MapScreen() {
               setSelectedPlace(null);
             }}
           />
-        </View>
-      ) : null}
+        ) : null}
+      </View>
+
       <MapShareModal
         visible={isShareModalVisible}
         places={places}
@@ -307,20 +339,51 @@ const styles = StyleSheet.create({
     right: 12,
     bottom: 12,
   },
-  statusBanner: {
-    position: 'absolute',
-    top: 72,
-    left: 20,
-    right: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 8,
+  loadingPill: {
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: colors.white,
+    borderRadius: 999,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  loadingText: {
+    fontSize: 14,
+    color: colors.text,
+  },
+  statusCard: {
+    backgroundColor: colors.white,
+    borderRadius: 18,
+    padding: 18,
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
     elevation: 3,
   },
-  statusText: {
+  statusTitle: {
+    fontSize: 18,
+    fontWeight: '700',
     color: colors.text,
-    fontSize: 13,
-    textAlign: 'center',
+  },
+  statusBody: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: colors.textMuted,
+    marginTop: 6,
+  },
+  retryButton: {
+    alignSelf: 'flex-start',
+    marginTop: 14,
+    backgroundColor: colors.sage,
+    borderRadius: 999,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+  },
+  retryText: {
+    fontSize: 14,
+    color: colors.text,
   },
 });
