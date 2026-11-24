@@ -32,7 +32,8 @@ export default function SmallActionButton({
 
 const styles = StyleSheet.create({
   smallButton: {
-    paddingVertical: 6,
+    paddingVertical: 8,
+    minHeight: 36,
     paddingHorizontal: 12,
     borderRadius: 2,
   },
@@ -44,11 +45,11 @@ const styles = StyleSheet.create({
   },
   smallButtonTextLight: {
     color: colors.textMuted,
-    fontSize: 12,
+    fontSize: 14,
   },
   smallButtonTextDark: {
     color: colors.white,
-    fontSize: 12,
+    fontSize: 14,
   },
   pressed: {
     opacity: 0.7,

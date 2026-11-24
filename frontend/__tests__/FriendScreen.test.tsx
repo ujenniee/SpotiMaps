@@ -15,7 +15,9 @@ jest.mock('../src/screens/FriendMapScreen', () => ({
   __esModule: true,
   default: () => null,
 }));
-
+jest.mock('@expo/vector-icons', () => ({
+  MaterialCommunityIcons: () => null,
+}));
 jest.mock('../src/lib/supabase', () => ({ supabase: {} }));
 jest.mock('../src/services/FriendService', () => ({
   acceptFriendRequest: jest.fn().mockResolvedValue(true),
