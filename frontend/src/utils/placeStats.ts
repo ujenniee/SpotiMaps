@@ -42,6 +42,11 @@ export function getPresentGenreFamilies(places: MapPlace[]): string[] {
   return [...genres].sort((a, b) => a.localeCompare(b));
 }
 
+export function getMarkerGenreFamilies(places: MapPlace[]): string[] {
+  const genres = new Set(places.map((place) => getGenreFamily(getTopGenre(place))));
+  return [...genres].sort((a, b) => a.localeCompare(b));
+}
+
 // Songs sorted by most played, for the Song Card list
 export function getRankedSongs(place: MapPlace): Song[] {
   return [...place.songs].sort((a, b) => b.plays - a.plays);

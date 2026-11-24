@@ -1,7 +1,10 @@
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const { genreColors, getGenreColor, getGenreFamily } = require('../src/theme.ts');
-const { getPresentGenreFamilies } = require('../src/utils/placeStats.ts');
+const {
+  getMarkerGenreFamilies,
+  getPresentGenreFamilies,
+} = require('../src/utils/placeStats.ts');
 
 function place(id, songs) {
   return {
@@ -44,6 +47,19 @@ test('returns only populated genre families across map places', () => {
       { title: 'Song E', artist: 'Artist', genre: 'Jazz', plays: 0 },
     ]),
   ]), ['Indie', 'Other', 'Rock']);
+});
+
+test('marker legend contains only genres used by each place marker', () => {
+  assert.deepEqual(getMarkerGenreFamilies([
+    place('first', [
+      { title: 'Song A', artist: 'Artist', genre: 'indie pop', plays: 4 },
+      { title: 'Song B', artist: 'Artist', genre: 'Rock', plays: 2 },
+    ]),
+    place('second', [
+      { title: 'Song C', artist: 'Artist', genre: 'unknown tag', plays: 3 },
+      { title: 'Song D', artist: 'Artist', genre: 'Jazz', plays: 1 },
+    ]),
+  ]), ['Indie', 'Other']);
 });
 
 test('returns no legend genres for an empty map or zero-play songs', () => {
