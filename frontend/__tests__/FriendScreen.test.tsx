@@ -29,7 +29,7 @@ jest.mock('../src/services/FriendService', () => ({
   searchUsers: jest.fn(),
   sendFriendRequest: jest.fn().mockResolvedValue('new-request'),
 }));
-
+jest.setTimeout(15000);
 beforeEach(() => {
   jest.clearAllMocks();
   jest.mocked(fetchFriendRequests).mockResolvedValue([

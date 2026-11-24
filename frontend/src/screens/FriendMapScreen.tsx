@@ -2,28 +2,24 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, LayoutAnimation, Pressable, StyleSheet, Text, View } from 'react-native';
 import MapView, { Marker, type Region } from 'react-native-maps';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors, getGenreColor, getReadableTextColor } from '../theme';
+import { colors, getGenreColor, getGenreFamily, getReadableTextColor } from '../theme';
 import { supabase } from '../lib/supabase';
 import type { MapPlace } from '../data/mockData';
 import { FriendMapUnavailableError, fetchFriendMapPlaces } from '../services/FriendMapService';
-import { getPresentGenreFamilies, getTopGenre, getTotalPlays } from '../utils/placeStats';
+import { getTopGenre, getTotalPlays } from '../utils/placeStats';
 import SongCardScreen from './SongCardScreen';
 
-// What happened when loading a friend's map.
-// "unavailable" covers both a private map and not being friends. The backend
-// treats them the same on purpose, so the app doesn't reveal which one it is.
+
 type FriendMapResult =
   | { status: 'ok'; places: MapPlace[] }
   | { status: 'unavailable' }
   | { status: 'empty' }
   | { status: 'error'; message: string };
 
-// TEMPORARY: set this to test each message, for example { status: 'unavailable' }.
-// Leave as null for normal use.
+
 const PREVIEW_RESULT: FriendMapResult | null = null;
 
-// Loads a friend's map with Jennie's FriendMapService and turns the answer
-// into one of the results above.
+
 async function loadFriendMap(friendId: string): Promise<FriendMapResult> {
   if (PREVIEW_RESULT) {
     return PREVIEW_RESULT;
@@ -51,16 +47,25 @@ type Props = {
 
 type LoadState = 'loading' | FriendMapResult['status'];
 
-// Starting view: centered on the UW campus
 const UW_REGION: Region = {
   latitude: 47.6545,
   longitude: -122.307,
   latitudeDelta: 0.012,
   longitudeDelta: 0.012,
 };
+function getListenedGenreFamilies(places: MapPlace[]): string[] {
+  const playsByGenre = new Map<string, number>();
+  places.forEach((place) => {
+    place.songs.forEach((song) => {
+      const family = getGenreFamily(song.genre);
+      playsByGenre.set(family, (playsByGenre.get(family) ?? 0) + song.plays);
+    });
+  });
+  return [...playsByGenre.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([genre]) => genre);
+}
 
-// Shows a friend's listening map, opened from View Map on the Friends screen.
-// Reuses the Map's markers and the Song Card, but is read-only.
 export default function FriendMapScreen({ friendId, friendName, onBack }: Props) {
   const mapRef = useRef<MapView>(null);
   const isMountedRef = useRef(true);
@@ -129,7 +134,7 @@ export default function FriendMapScreen({ friendId, friendName, onBack }: Props)
     });
   }, [isMapReady, places]);
 
-  const presentGenres = getPresentGenreFamilies(places);
+  const presentGenres = getListenedGenreFamilies(places);
 
   // The message to show when the map can't be shown
   let message: { title: string; body: string; canRetry: boolean } | null = null;
