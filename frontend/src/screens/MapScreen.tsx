@@ -3,7 +3,7 @@ import { ActivityIndicator, LayoutAnimation, Pressable, StyleSheet, Text, View }
 import MapView, { Marker, type Region } from 'react-native-maps';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { colors, getGenreColor } from '../theme';
+import { colors, getGenreColor, getReadableTextColor } from '../theme';
 import { supabase } from '../lib/supabase';
 import type { MapPlace } from '../data/mockData';
 import { fetchMapPlaces } from '../services/MapDataService';
@@ -11,7 +11,6 @@ import { getMarkerGenreFamilies, getTopGenre, getTotalPlays } from '../utils/pla
 import SongCardScreen from './SongCardScreen';
 import MapShareModal from '../components/MapShareModal';
 
-// Starting view: centered on the UW campus
 const UW_REGION: Region = {
   latitude: 47.6545,
   longitude: -122.307,
@@ -134,8 +133,19 @@ export default function MapScreen() {
               setIsCardExpanded(true);
             }}
           >
-            <View style={[styles.bubble, { backgroundColor: getGenreColor(getTopGenre(place)) }]}>
-              <Text style={styles.bubbleText}>{getTotalPlays(place)}</Text>
+            <View
+              style={[styles.bubble, { backgroundColor: getGenreColor(getTopGenre(place)) }]}
+              accessible
+              accessibilityLabel={`${place.name}, ${getTotalPlays(place)} plays, mostly ${getTopGenre(place) ?? 'unknown genre'}`}
+            >
+              <Text
+                style={[
+                  styles.bubbleText,
+                  { color: getReadableTextColor(getGenreColor(getTopGenre(place))) },
+                ]}
+              >
+                {getTotalPlays(place)}
+              </Text>
             </View>
           </Marker>
         ))}
@@ -152,7 +162,6 @@ export default function MapScreen() {
             ))}
           </View>
         ) : (
-          // Keeps the zoom buttons on the right when there's no legend
           <View />
         )}
 
@@ -271,7 +280,7 @@ const styles = StyleSheet.create({
   },
   legend: {
     marginTop: 8,
-    backgroundColor: 'rgba(105, 109, 125, 0.7)',
+    backgroundColor: 'rgba(50, 52, 62, 0.9)',
     borderRadius: 6,
     paddingVertical: 6,
     paddingHorizontal: 10,
@@ -286,14 +295,14 @@ const styles = StyleSheet.create({
     marginVertical: 2,
   },
   legendDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
     marginRight: 6,
   },
   legendText: {
     color: colors.white,
-    fontSize: 12,
+    fontSize: 14,
   },
   zoomButtons: {
     backgroundColor: colors.white,

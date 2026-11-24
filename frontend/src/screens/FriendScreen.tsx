@@ -17,7 +17,7 @@ import {
   type FriendRequest,
   type FriendSearchResult,
 } from '../services/FriendService';
-import { colors } from '../theme';
+import { colors, getReadableTextColor } from '../theme';
 import FriendMapScreen from './FriendMapScreen';
 
 // Messages users see. The technical error still goes to the console for debugging.
@@ -29,7 +29,9 @@ const UNAVAILABLE_MESSAGE = 'That friend request or friendship is no longer avai
 function Avatar({ name, color }: { name: string; color: string }) {
   return (
     <View style={[styles.avatar, { backgroundColor: color }]}>
-      <Text style={styles.avatarText}>{name.charAt(0).toUpperCase()}</Text>
+      <Text style={[styles.avatarText, { color: getReadableTextColor(color) }]}>
+        {name.charAt(0).toUpperCase()}
+      </Text>    
     </View>
   );
 }
@@ -369,12 +371,13 @@ const styles = StyleSheet.create({
   },
   avatarText: {
     color: colors.text,
-    fontSize: 16,
+    fontSize: 17,
+    fontWeight: '700',
   },
   name: {
     flex: 1,
     color: colors.white,
-    fontSize: 14,
+    fontSize: 15,
   },
   buttonGroup: {
     flexDirection: 'row',
@@ -390,12 +393,12 @@ const styles = StyleSheet.create({
   },
   privateText: {
     color: colors.white,
-    fontSize: 12,
+    fontSize: 14,
     fontStyle: 'italic',
   },
   empty: {
     color: colors.white,
-    fontSize: 13,
+    fontSize: 15,
     paddingVertical: 12,
   },
 });

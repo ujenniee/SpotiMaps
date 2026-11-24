@@ -144,3 +144,15 @@ export function getGenreFamily(genre: string | null): string {
 export function getGenreColor(genre: string | null): string {
   return genreColors[getGenreFamily(genre)];
 }
+
+export function getReadableTextColor(backgroundHex: string): string {
+  const hex = backgroundHex.replace('#', '');
+  const channel = (start: number) => {
+    const value = parseInt(hex.slice(start, start + 2), 16) / 255;
+    return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  };
+  const luminance = 0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4);
+  const contrastWithWhite = 1.05 / (luminance + 0.05);
+  const contrastWithBlack = (luminance + 0.05) / 0.05;
+  return contrastWithWhite >= contrastWithBlack ? colors.white : colors.text;
+}

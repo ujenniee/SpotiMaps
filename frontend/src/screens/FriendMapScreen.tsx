@@ -2,8 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, LayoutAnimation, Pressable, StyleSheet, Text, View } from 'react-native';
 import MapView, { Marker, type Region } from 'react-native-maps';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors, getGenreColor } from '../theme';
-import { supabase } from '../lib/supabase';
+import { colors, getGenreColor, getReadableTextColor } from '../theme';import { supabase } from '../lib/supabase';
 import type { MapPlace } from '../data/mockData';
 import { FriendMapUnavailableError, fetchFriendMapPlaces } from '../services/FriendMapService';
 import { getTopGenre, getTotalPlays } from '../utils/placeStats';
@@ -129,8 +128,19 @@ export default function FriendMapScreen({ friendId, friendName, onBack }: Props)
               setIsCardExpanded(true);
             }}
           >
-            <View style={[styles.bubble, { backgroundColor: getGenreColor(getTopGenre(place)) }]}>
-              <Text style={styles.bubbleText}>{getTotalPlays(place)}</Text>
+            <View
+              style={[styles.bubble, { backgroundColor: getGenreColor(getTopGenre(place)) }]}
+              accessible
+              accessibilityLabel={`${place.name}, ${getTotalPlays(place)} plays, mostly ${getTopGenre(place) ?? 'unknown genre'}`}
+            >
+              <Text
+                style={[
+                  styles.bubbleText,
+                  { color: getReadableTextColor(getGenreColor(getTopGenre(place))) },
+                ]}
+              >
+                {getTotalPlays(place)}
+              </Text>
             </View>
           </Marker>
         ))}
