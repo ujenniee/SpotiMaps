@@ -139,5 +139,54 @@ export async function syncListeningHistory(
     // Saving succeeded; retrying sync is safe and will request matching again.
     matchingError = error instanceof Error ? error.message : 'Could not request song-location matching.';
   }
+  // Genre enrichment is best-effort and must not interrupt Spotify or GPS syncing.
+  try {
+    await enrichMissingGenre(client);
+  } catch (error) {
+    console.warn('Genre enrichment skipped:', error);
+  }
   return { fetchedCount: plays.length, insertedCount, skippedCount, matchingError };
+}
+/**
+ * Find one listening-history entry without a genre
+ * and ask our Edge Function to populate it.
+ */
+export async function enrichMissingGenre(
+  client: SupabaseClient<Database>,
+) {
+  const { data: auth, error: authError } = await client.auth.getUser();
+
+  if (authError || !auth.user) {
+    throw new Error('Sign in to SpotiMaps before detecting genres.');
+  }
+
+  const { data: songs, error: songsError } = await client
+    .from('listening_history')
+    .select('id')
+    .eq('user_id', auth.user.id)
+    .is('genre', null)
+    .order('listened_at', { ascending: false })
+    .limit(1);
+
+  if (songsError) {
+    throw new Error(songsError.message);
+  }
+
+  const song = songs?.[0];
+
+  if (!song) {
+    return { message: 'No songs missing genres.' };
+  }
+
+  const { data, error } = await client.functions.invoke('lookup-genre', {
+    body: {
+      listeningHistoryId: song.id,
+    },
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
 }
