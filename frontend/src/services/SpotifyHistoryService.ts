@@ -160,33 +160,68 @@ export async function enrichMissingGenre(
     throw new Error('Sign in to SpotiMaps before detecting genres.');
   }
 
+  // Find up to 5 songs missing genres.
   const { data: songs, error: songsError } = await client
     .from('listening_history')
-    .select('id')
+    .select('id, title, artist')
     .eq('user_id', auth.user.id)
-    .is('genre', null)
+    .or('genre.is.null,genre.eq.""')
     .order('listened_at', { ascending: false })
-    .limit(1);
+    .limit(5);
 
   if (songsError) {
     throw new Error(songsError.message);
   }
 
-  const song = songs?.[0];
-
-  if (!song) {
-    return { message: 'No songs missing genres.' };
+  if (!songs || songs.length === 0) {
+    console.log('GENRE: All songs already have genres.');
+    return { processed: 0, results: [] };
   }
 
-  const { data, error } = await client.functions.invoke('lookup-genre', {
-    body: {
-      listeningHistoryId: song.id,
-    },
-  });
+  console.log(`GENRE: Processing ${songs.length} songs.`);
 
-  if (error) {
-    throw error;
+  const results = [];
+
+  // Process sequentially to avoid simultaneous MusicBrainz requests.
+  for (const song of songs) {
+    try {
+      console.log(`GENRE: Looking up ${song.title} by ${song.artist}`);
+
+      const { data, error } = await client.functions.invoke('lookup-genre', {
+        body: {
+          listeningHistoryId: song.id,
+        },
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      results.push({
+        title: song.title,
+        artist: song.artist,
+        success: true,
+        data,
+      });
+
+      console.log(`GENRE: Result for ${song.title}:`, data);
+
+    } catch (error) {
+      console.warn(`GENRE: Failed for ${song.title}:`, error);
+
+      results.push({
+        title: song.title,
+        artist: song.artist,
+        success: false,
+      });
+    }
+
+    // Space out Edge Function calls.
+    await new Promise((resolve) => setTimeout(resolve, 2000));
   }
 
-  return data;
+  return {
+    processed: songs.length,
+    results,
+  };
 }

@@ -57,7 +57,10 @@ import {
 
 import { getSupabaseSession } from './src/services/SupabaseAuthService';
 import { connectSpotifyAccount, type SpotifyConnection } from './src/services/SpotifyAuthService';
-import { SpotifyHistoryError, syncListeningHistory } from './src/services/SpotifyHistoryService';
+import {
+  SpotifyHistoryError,
+  syncListeningHistory,
+} from './src/services/SpotifyHistoryService';
 import { supabase } from './src/lib/supabase';
 
 const SKIP_LOGIN_FOR_TESTING = false;
