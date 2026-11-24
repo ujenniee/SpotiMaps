@@ -178,7 +178,7 @@ const styles = StyleSheet.create({
   },
   rules: {
     fontSize: 12,
-    color: '#5F6270',
+    color: '#2B2D33',
     marginTop: 8,
   },
   errorText: {

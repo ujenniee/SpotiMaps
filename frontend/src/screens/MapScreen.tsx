@@ -1,21 +1,35 @@
-import { useEffect, useRef, useState } from 'react';
-import { LayoutAnimation, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, LayoutAnimation, Pressable, StyleSheet, Text, View } from 'react-native';
 import MapView, { Marker, type Region } from 'react-native-maps';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors, getGenreColor } from '../theme';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { colors, getGenreColor, getGenreFamily, getReadableTextColor } from '../theme';
 import { supabase } from '../lib/supabase';
 import type { MapPlace } from '../data/mockData';
 import { fetchMapPlaces } from '../services/MapDataService';
-import { getPresentGenreFamilies, getTopGenre, getTotalPlays } from '../utils/placeStats';
+import { getTopGenre, getTotalPlays } from '../utils/placeStats';
 import SongCardScreen from './SongCardScreen';
+import MapShareModal from '../components/MapShareModal';
 
-// Starting view: centered on the UW campus
 const UW_REGION: Region = {
   latitude: 47.6545,
   longitude: -122.307,
   latitudeDelta: 0.012,
   longitudeDelta: 0.012,
 };
+
+function getListenedGenreFamilies(places: MapPlace[]): string[] {
+  const playsByGenre = new Map<string, number>();
+  places.forEach((place) => {
+    place.songs.forEach((song) => {
+      const family = getGenreFamily(song.genre);
+      playsByGenre.set(family, (playsByGenre.get(family) ?? 0) + song.plays);
+    });
+  });
+  return [...playsByGenre.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([genre]) => genre);
+}
 
 type Props = {
   refreshVersion?: number;
@@ -36,14 +50,18 @@ export default function MapScreen({
   const isLoadingPlacesRef = useRef(false);
   const pendingRefreshRef = useRef(false);
   const mountVersionRef = useRef(0);
-  const hasSelectedInitialPlaceRef = useRef(false);
   const hasFitInitialPlacesRef = useRef(false);
   const [places, setPlaces] = useState<MapPlace[]>([]);
   const [selectedPlace, setSelectedPlace] = useState<MapPlace | null>(null);
   const [isCardExpanded, setIsCardExpanded] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [hasLoadError, setHasLoadError] = useState(false);
   const [isMapReady, setIsMapReady] = useState(false);
+  // Keep an open share editor stable while automatic refreshes update the map.
+  const [shareSnapshot, setShareSnapshot] = useState<{
+    places: MapPlace[];
+    initialPlaceId: string | null;
+  } | null>(null);
 
   // Makes the card slide smoothly instead of jumping
   const animateCard = () => {
@@ -60,14 +78,16 @@ export default function MapScreen({
     };
   }, []);
 
-  useEffect(() => {
+  // Automatic refresh and manual retry share one queue, without hiding saved data.
+  const loadPlaces = useCallback(async () => {
+    if (!isMountedRef.current) return;
     pendingRefreshRef.current = true;
     if (isLoadingPlacesRef.current) {
       return;
     }
 
-    async function loadPlaces() {
-      isLoadingPlacesRef.current = true;
+    isLoadingPlacesRef.current = true;
+    try {
       // Coalesce refreshes that arrive during a request into one follow-up load.
       while (isMountedRef.current && pendingRefreshRef.current) {
         pendingRefreshRef.current = false;
@@ -75,19 +95,15 @@ export default function MapScreen({
         try {
           const nextPlaces = await fetchMapPlaces(supabase);
           if (isMountedRef.current && mountVersion === mountVersionRef.current) {
-            const selectInitialPlace = !hasSelectedInitialPlaceRef.current && nextPlaces.length > 0;
-            if (selectInitialPlace) {
-              hasSelectedInitialPlaceRef.current = true;
-            }
             setPlaces(nextPlaces);
-            setSelectedPlace((current) => selectInitialPlace
-              ? nextPlaces[0]
-              : nextPlaces.find((place) => place.id === current?.id) ?? null);
-            setLoadError(null);
+            // Cards open only on marker taps; refresh an open card by its location ID.
+            setSelectedPlace((current) => nextPlaces.find((place) => place.id === current?.id) ?? null);
+            setHasLoadError(false);
           }
         } catch (error) {
           if (isMountedRef.current && mountVersion === mountVersionRef.current) {
-            setLoadError(error instanceof Error ? error.message : 'Could not load map data.');
+            console.warn('Could not load map data:', error);
+            setHasLoadError(true);
           }
         } finally {
           if (isMountedRef.current && mountVersion === mountVersionRef.current) {
@@ -95,11 +111,14 @@ export default function MapScreen({
           }
         }
       }
+    } finally {
       isLoadingPlacesRef.current = false;
     }
+  }, []);
 
+  useEffect(() => {
     void loadPlaces();
-  }, [refreshVersion]);
+  }, [loadPlaces, refreshVersion]);
 
   useEffect(() => {
     if (hasFitInitialPlacesRef.current || !isMapReady || isLoading || places.length === 0) {
@@ -142,7 +161,9 @@ export default function MapScreen({
       250,
     );
   };
-  const presentGenres = getPresentGenreFamilies(places);
+
+  const presentGenres = getListenedGenreFamilies(places);
+  const isEmpty = !isLoading && !hasLoadError && places.length === 0;
 
   return (
     <View style={styles.container}>
@@ -166,8 +187,19 @@ export default function MapScreen({
               setIsCardExpanded(true);
             }}
           >
-            <View style={[styles.bubble, { backgroundColor: getGenreColor(getTopGenre(place)) }]}>
-              <Text style={styles.bubbleText}>{getTotalPlays(place)}</Text>
+            <View
+              style={[styles.bubble, { backgroundColor: getGenreColor(getTopGenre(place)) }]}
+              accessible
+              accessibilityLabel={`${place.name}, ${getTotalPlays(place)} plays, mostly ${getTopGenre(place) ?? 'unknown genre'}`}
+            >
+              <Text
+                style={[
+                  styles.bubbleText,
+                  { color: getReadableTextColor(getGenreColor(getTopGenre(place))) },
+                ]}
+              >
+                {getTotalPlays(place)}
+              </Text>
             </View>
           </Marker>
         ))}
@@ -183,45 +215,93 @@ export default function MapScreen({
               </View>
             ))}
           </View>
-        ) : null}
+        ) : (
+          <View />
+        )}
 
-        <View style={styles.zoomButtons}>
-          <Pressable style={styles.zoomButton} onPress={() => zoom(0.5)} accessibilityLabel="Zoom in">
-            <Text style={styles.zoomText}>+</Text>
-          </Pressable>
-          <View style={styles.zoomDivider} />
-          <Pressable style={styles.zoomButton} onPress={() => zoom(2)} accessibilityLabel="Zoom out">
-            <Text style={styles.zoomText}>−</Text>
-          </Pressable>
+        <View style={styles.mapControls}>
+          <View style={styles.zoomButtons}>
+            <Pressable style={styles.zoomButton} onPress={() => zoom(0.5)} accessibilityLabel="Zoom in">
+              <Text style={styles.zoomText}>+</Text>
+            </Pressable>
+            <View style={styles.zoomDivider} />
+            <Pressable style={styles.zoomButton} onPress={() => zoom(2)} accessibilityLabel="Zoom out">
+              <Text style={styles.zoomText}>−</Text>
+            </Pressable>
+          </View>
+          {places.length > 0 && (
+            <Pressable
+              onPress={() => setShareSnapshot({ places, initialPlaceId: selectedPlace?.id ?? null })}
+              style={({ pressed }) => [styles.shareButton, pressed && styles.pressed]}
+              accessibilityRole="button"
+              accessibilityLabel="Create a shareable image of your map"
+            >
+              <MaterialCommunityIcons name="share-variant" size={17} color={colors.text} />
+              <Text style={styles.shareButtonText}>Share map</Text>
+            </Pressable>
+          )}
         </View>
       </SafeAreaView>
 
-      {isLoading || loadError || syncError || onReconnectSpotify || places.length === 0 ? (
-        <View style={styles.statusBanner} accessibilityRole="summary">
-          <Text style={styles.statusText}>
-            {syncError || loadError || (isLoading
-              ? 'Loading your listening history…'
-              : places.length === 0
-                ? 'No matched listening data from the last 7 days. Save listening history and GPS samples to see places here.'
-                : 'Reconnect Spotify to import your recent listening history.')}
-          </Text>
-          {onReconnectSpotify ? (
+      <View style={styles.bottomSheet} pointerEvents="box-none">
+        {isLoading ? (
+          <View style={styles.loadingPill}>
+            <ActivityIndicator color={colors.text} />
+            <Text style={styles.loadingText}>Loading your map…</Text>
+          </View>
+        ) : null}
+
+        {syncError || onReconnectSpotify ? (
+          <View style={styles.statusCard} accessibilityRole="alert">
+            <Text style={styles.statusBody}>
+              {syncError || 'Reconnect Spotify to import your recent listening history.'}
+            </Text>
+            {onReconnectSpotify ? (
+              <Pressable
+                onPress={onReconnectSpotify}
+                disabled={isReconnectingSpotify}
+                style={styles.reconnectButton}
+                accessibilityRole="button"
+              >
+                <Text style={styles.reconnectText}>
+                  {isReconnectingSpotify ? 'Connecting…' : 'Reconnect Spotify'}
+                </Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
+
+        {hasLoadError ? (
+          <View style={styles.statusCard} accessibilityRole="alert">
+            <Text style={styles.statusTitle}>Couldn’t load your map</Text>
+            <Text style={styles.statusBody}>
+              Something went wrong loading your listening history. Please try again.
+            </Text>
             <Pressable
-              onPress={onReconnectSpotify}
-              disabled={isReconnectingSpotify}
-              style={styles.reconnectButton}
+              onPress={() => {
+                setIsLoading(true);
+                setHasLoadError(false);
+                void loadPlaces();
+              }}
+              style={({ pressed }) => [styles.retryButton, pressed && styles.pressed]}
               accessibilityRole="button"
             >
-              <Text style={styles.reconnectText}>
-                {isReconnectingSpotify ? 'Connecting…' : 'Reconnect Spotify'}
-              </Text>
+              <Text style={styles.retryText}>Try again</Text>
             </Pressable>
-          ) : null}
-        </View>
-      ) : null}
+          </View>
+        ) : null}
 
-      {selectedPlace ? (
-        <View style={styles.bottomSheet}>
+        {isEmpty ? (
+          <View style={styles.statusCard}>
+            <Text style={styles.statusTitle}>Keep listening to build your map!</Text>
+            <Text style={styles.statusBody}>
+              Places show up here after you listen to music with location tracking on. Your map
+              shows the last 7 days.
+            </Text>
+          </View>
+        ) : null}
+
+        {selectedPlace ? (
           <SongCardScreen
             place={selectedPlace}
             isExpanded={isCardExpanded}
@@ -234,8 +314,15 @@ export default function MapScreen({
               setSelectedPlace(null);
             }}
           />
-        </View>
-      ) : null}
+        ) : null}
+      </View>
+
+      <MapShareModal
+        visible={shareSnapshot !== null}
+        places={shareSnapshot?.places ?? places}
+        initialPlaceId={shareSnapshot?.initialPlaceId ?? null}
+        onClose={() => setShareSnapshot(null)}
+      />
     </View>
   );
 }
@@ -271,10 +358,14 @@ const styles = StyleSheet.create({
   },
   legend: {
     marginTop: 8,
-    backgroundColor: 'rgba(105, 109, 125, 0.7)',
+    backgroundColor: 'rgba(50, 52, 62, 0.9)',
     borderRadius: 6,
     paddingVertical: 6,
     paddingHorizontal: 10,
+  },
+  mapControls: {
+    alignItems: 'flex-end',
+    marginTop: 8,
   },
   legendRow: {
     flexDirection: 'row',
@@ -282,17 +373,16 @@ const styles = StyleSheet.create({
     marginVertical: 2,
   },
   legendDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
     marginRight: 6,
   },
   legendText: {
     color: colors.white,
-    fontSize: 12,
+    fontSize: 14,
   },
   zoomButtons: {
-    marginTop: 8,
     backgroundColor: colors.white,
     borderRadius: 6,
     overflow: 'hidden',
@@ -311,27 +401,77 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: colors.input,
   },
+  shareButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 8,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    backgroundColor: colors.white,
+    elevation: 3,
+  },
+  shareButtonText: {
+    color: colors.text,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  pressed: {
+    opacity: 0.7,
+  },
   bottomSheet: {
     position: 'absolute',
     left: 12,
     right: 12,
     bottom: 12,
   },
-  statusBanner: {
-    position: 'absolute',
-    top: 72,
-    left: 20,
-    right: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 8,
+  loadingPill: {
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: colors.white,
+    borderRadius: 999,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  loadingText: {
+    fontSize: 14,
+    color: colors.text,
+  },
+  statusCard: {
+    backgroundColor: colors.white,
+    borderRadius: 18,
+    padding: 18,
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
     elevation: 3,
   },
-  statusText: {
+  statusTitle: {
+    fontSize: 18,
+    fontWeight: '700',
     color: colors.text,
-    fontSize: 13,
-    textAlign: 'center',
+  },
+  statusBody: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: colors.textMuted,
+    marginTop: 6,
+  },
+  retryButton: {
+    alignSelf: 'flex-start',
+    marginTop: 14,
+    backgroundColor: colors.sage,
+    borderRadius: 999,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+  },
+  retryText: {
+    fontSize: 14,
+    color: colors.text,
   },
   reconnectButton: {
     alignSelf: 'center',

@@ -342,7 +342,7 @@ const styles = StyleSheet.create({
   },
   visibilityNote: {
     fontSize: 13,
-    color: '#5F6270',
+    color: '#2B2D33',
     marginTop: 10,
   },
   placeRow: {

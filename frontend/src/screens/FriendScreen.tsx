@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import SmallActionButton from '../components/SmallActionButton';
 import { supabase } from '../lib/supabase';
 import {
@@ -16,13 +17,21 @@ import {
   type FriendRequest,
   type FriendSearchResult,
 } from '../services/FriendService';
-import { colors } from '../theme';
+import { colors, getReadableTextColor } from '../theme';
 import FriendMapScreen from './FriendMapScreen';
+
+// Messages users see. The technical error still goes to the console for debugging.
+const LOAD_ERROR_MESSAGE = 'Couldn’t load your friends. Pull down or tap Try again.';
+const SEARCH_ERROR_MESSAGE = 'Couldn’t search right now. Please try again.';
+const ACTION_ERROR_MESSAGE = 'Something went wrong. Please try again.';
+const UNAVAILABLE_MESSAGE = 'That friend request or friendship is no longer available.';
 
 function Avatar({ name, color }: { name: string; color: string }) {
   return (
     <View style={[styles.avatar, { backgroundColor: color }]}>
-      <Text style={styles.avatarText}>{name.charAt(0).toUpperCase()}</Text>
+      <Text style={[styles.avatarText, { color: getReadableTextColor(color) }]}>
+        {name.charAt(0).toUpperCase()}
+      </Text>    
     </View>
   );
 }
@@ -38,6 +47,7 @@ export default function FriendScreen() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   // The friend whose map is open, or null when showing the friends list
   const [viewingFriend, setViewingFriend] = useState<Friend | null>(null);
   const isMounted = useRef(true);
@@ -54,8 +64,9 @@ export default function FriendScreen() {
         setFriends(nextFriends);
       }
     } catch (error) {
+      console.warn('Could not load friends:', error);
       if (isMounted.current) {
-        setLoadError(error instanceof Error ? error.message : 'Could not load friends.');
+        setLoadError(LOAD_ERROR_MESSAGE);
       }
     } finally {
       if (isMounted.current) {
@@ -63,6 +74,12 @@ export default function FriendScreen() {
       }
     }
   }, []);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadData();
+    if (isMounted.current) setRefreshing(false);
+  }, [loadData]);
 
   useEffect(() => {
     isMounted.current = true;
@@ -91,8 +108,9 @@ export default function FriendScreen() {
           if (active && isMounted.current) setSearchResults(results);
         })
         .catch((error: unknown) => {
+          console.warn('Could not search users:', error);
           if (active && isMounted.current) {
-            setSearchError(error instanceof Error ? error.message : 'Could not search users.');
+            setSearchError(SEARCH_ERROR_MESSAGE);
           }
         })
         .finally(() => {
@@ -112,12 +130,15 @@ export default function FriendScreen() {
     try {
       const result = await action();
       if (result === false) {
-        throw new Error('That friend request or friendship is no longer available.');
+        if (isMounted.current) setActionError(UNAVAILABLE_MESSAGE);
+        await loadData();
+        return;
       }
       await loadData();
     } catch (error) {
+      console.warn('Friend action failed:', error);
       if (isMounted.current) {
-        setActionError(error instanceof Error ? error.message : 'Could not complete the friend action.');
+        setActionError(ACTION_ERROR_MESSAGE);
       }
     } finally {
       if (isMounted.current) setBusy(false);
@@ -142,9 +163,21 @@ export default function FriendScreen() {
 
   return (
     <SafeAreaView edges={['top']} style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={() => void handleRefresh()} />
+        }
+      >
         <Text style={styles.title}>Friends</Text>
-        {loadError ? <Text style={styles.loadError}>{loadError}</Text> : null}
+
+        {loadError ? (
+          <View style={styles.errorRow}>
+            <Text style={[styles.error, styles.errorText]}>{loadError}</Text>
+            <SmallActionButton label="Try again" variant="dark" onPress={() => void handleRefresh()} />
+          </View>
+        ) : null}
         {actionError ? <Text style={styles.error}>{actionError}</Text> : null}
 
         <TextInput
@@ -155,6 +188,7 @@ export default function FriendScreen() {
           placeholderTextColor={colors.textMuted}
           autoCapitalize="none"
           autoCorrect={false}
+          accessibilityLabel="Search by username"
         />
 
         {search.trim().length > 0 ? (
@@ -238,12 +272,22 @@ export default function FriendScreen() {
               <Avatar name={friend.name} color={friend.color} />
               <Text style={styles.name}>{friend.name.toUpperCase()}</Text>
               <View style={styles.buttonGroup}>
-                <SmallActionButton
-                  label={friend.mapVisible ? 'View Map' : 'Map is Private'}
-                  variant="dark"
-                  disabled={!friend.mapVisible}
-                  onPress={() => setViewingFriend(friend)}
-                />
+                {friend.mapVisible ? (
+                  <SmallActionButton
+                    label="View Map"
+                    variant="dark"
+                    onPress={() => setViewingFriend(friend)}
+                  />
+                ) : (
+                  <View
+                    style={styles.privateLabel}
+                    accessible
+                    accessibilityLabel={`${friend.name}'s map is private`}
+                  >
+                    <MaterialCommunityIcons name="lock" size={14} color={colors.white} />
+                    <Text style={styles.privateText}>Map is private</Text>
+                  </View>
+                )}
                 <SmallActionButton
                   label="Remove"
                   variant="dark"
@@ -275,12 +319,19 @@ const styles = StyleSheet.create({
     marginTop: 16,
     marginBottom: 12,
   },
-  loadError: {
-    color: colors.error,
+  errorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
     marginBottom: 8,
+  },
+  errorText: {
+    flex: 1,
+    marginBottom: 0,
   },
   error: {
     color: colors.error,
+    fontSize: 14,
     marginBottom: 8,
   },
   search: {
@@ -320,20 +371,34 @@ const styles = StyleSheet.create({
   },
   avatarText: {
     color: colors.text,
-    fontSize: 16,
+    fontSize: 17,
+    fontWeight: '700',
   },
   name: {
     flex: 1,
     color: colors.white,
-    fontSize: 14,
+    fontSize: 15,
   },
   buttonGroup: {
     flexDirection: 'row',
+    alignItems: 'center',
     gap: 6,
+  },
+  privateLabel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+  },
+  privateText: {
+    color: colors.white,
+    fontSize: 14,
+    fontStyle: 'italic',
   },
   empty: {
     color: colors.white,
-    fontSize: 13,
+    fontSize: 15,
     paddingVertical: 12,
   },
 });

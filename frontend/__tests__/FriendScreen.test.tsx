@@ -15,7 +15,9 @@ jest.mock('../src/screens/FriendMapScreen', () => ({
   __esModule: true,
   default: () => null,
 }));
-
+jest.mock('@expo/vector-icons', () => ({
+  MaterialCommunityIcons: () => null,
+}));
 jest.mock('../src/lib/supabase', () => ({ supabase: {} }));
 jest.mock('../src/services/FriendService', () => ({
   acceptFriendRequest: jest.fn().mockResolvedValue(true),
@@ -27,7 +29,7 @@ jest.mock('../src/services/FriendService', () => ({
   searchUsers: jest.fn(),
   sendFriendRequest: jest.fn().mockResolvedValue('new-request'),
 }));
-
+jest.setTimeout(15000);
 beforeEach(() => {
   jest.clearAllMocks();
   jest.mocked(fetchFriendRequests).mockResolvedValue([

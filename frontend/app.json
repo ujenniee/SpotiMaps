@@ -37,7 +37,18 @@
         }
       ],
       "expo-asset",
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-sharing",
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "SpotiMaps saves your exported music map images to your photo library.",
+          "savePhotosPermission": "SpotiMaps saves your exported music map images to your photo library.",
+          "granularPermissions": [
+            "photo"
+          ]
+        }
+      ]
     ]
   }
 }
