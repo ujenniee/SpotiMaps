@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -18,41 +19,36 @@ type Props = {
   isSettingsLoading: boolean;
   settingsError: string | null;
   trackingStatus: string | null;
+  spotifyDisplayName?: string | null;
+  spotifyConnected?: boolean;
   onSave: (updates: PrivacySettingsUpdate) => Promise<void>;
   onRetry: () => void;
   onLogout: () => Promise<void>;
+  onDisconnectSpotify?: () => Promise<void>;
 };
 
 const PANEL_COLOR = '#A3A3A3';
 const SELECTED_COLOR = '#6B6F80';
-
-const SPOTIFY_DISPLAY_NAME = 'harley.z';
-
-const PLACES = [
-  'Bill & Melinda Gates Center',
-  'Paul G. Allen Center of Computer Science',
-  'Husky Union Building',
-  'IMA',
-  'Odegaard Library',
-  'The Quad',
-];
 
 export default function PrivacyScreen({
   settings,
   isSettingsLoading,
   settingsError,
   trackingStatus,
+  spotifyDisplayName,
+  spotifyConnected = false,
   onSave,
   onRetry,
   onLogout,
+  onDisconnectSpotify,
 }: Props) {
-  const [hiddenPlaces, setHiddenPlaces] = useState<Record<string, boolean>>({});
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [isDisconnecting, setIsDisconnecting] = useState(false);
+  const [spotifyError, setSpotifyError] = useState<string | null>(null);
 
-  const toggleHiddenPlace = (place: string) => {
-    setHiddenPlaces((current) => ({ ...current, [place]: !current[place] }));
-  };
+  // App.tsx tells us whether Spotify is connected; the name alone isn't reliable
+  const isSpotifyConnected = spotifyConnected || Boolean(spotifyDisplayName?.trim());
 
   const save = async (updates: PrivacySettingsUpdate) => {
     if (isSaving) return;
@@ -76,6 +72,33 @@ export default function PrivacyScreen({
     }
   };
 
+  const disconnectSpotify = async () => {
+    if (!onDisconnectSpotify) return;
+
+    setIsDisconnecting(true);
+    setSpotifyError(null);
+    try {
+      await onDisconnectSpotify();
+    } catch (error) {
+      console.warn('Spotify disconnect failed:', error);
+      setSpotifyError('Couldn’t disconnect Spotify. Please try again.');
+    } finally {
+      setIsDisconnecting(false);
+    }
+  };
+
+  // Ask first, so nobody disconnects by accident
+  const confirmDisconnect = () => {
+    Alert.alert(
+      'Disconnect Spotify?',
+      'SpotiMaps will stop adding new songs to your map. Your existing map stays. You can reconnect anytime.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Disconnect', style: 'destructive', onPress: () => void disconnectSpotify() },
+      ],
+    );
+  };
+
   const mapVisibility = settings?.map_visibility ?? 'private';
   const isTrackingEnabled = settings?.location_tracking_enabled ?? false;
   const settingsDisabled = !settings || isSettingsLoading || isSaving;
@@ -89,19 +112,35 @@ export default function PrivacyScreen({
         {/* Spotify connection */}
         <Text style={styles.sectionHeader}>SPOTIFY</Text>
         <View style={styles.panel}>
-          <Text style={styles.rowTitle}>Connected as {SPOTIFY_DISPLAY_NAME}</Text>
           <View style={styles.spotifyRow}>
-            <Text style={[styles.rowNote, styles.spotifyNote]}>
-              SpotiMaps can read your recently played tracks only
-            </Text>
-            {/* UI only for now: disconnecting comes with Harley's Spotify work */}
-            <Pressable
-              style={({ pressed }) => [styles.lightButton, pressed && styles.pressed]}
-              accessibilityRole="button"
-            >
-              <Text style={styles.lightButtonText}>Disconnect</Text>
-            </Pressable>
+            <View style={styles.spotifyNote}>
+              <Text style={styles.rowTitle}>
+                {isSpotifyConnected ? 'Spotify connected' : 'Spotify not connected'}
+              </Text>
+              <Text style={styles.rowNote}>
+                {isSpotifyConnected
+                  ? 'SpotiMaps can read your recently played tracks only'
+                  : 'Connect Spotify so your songs can show up on your map'}
+              </Text>
+            </View>
+            {isSpotifyConnected && onDisconnectSpotify ? (
+              <Pressable
+                onPress={confirmDisconnect}
+                disabled={isDisconnecting}
+                style={({ pressed }) => [
+                  styles.lightButton,
+                  (pressed || isDisconnecting) && styles.pressed,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Disconnect Spotify"
+              >
+                <Text style={styles.lightButtonText}>
+                  {isDisconnecting ? 'Disconnecting…' : 'Disconnect'}
+                </Text>
+              </Pressable>
+            ) : null}
           </View>
+          {spotifyError ? <Text style={styles.spotifyErrorText}>{spotifyError}</Text> : null}
         </View>
 
         {/* Privacy */}
@@ -179,29 +218,10 @@ export default function PrivacyScreen({
             </View>
             <Text style={styles.visibilityNote}>
               {mapVisibility === 'private'
-                ? 'Your map remains visible only to you'
-                : 'Saved for future friend sharing; maps remain private until sharing is implemented'}
+                ? 'Only you can see your map'
+                : 'Only friends you have accepted can see your map'}
             </Text>
           </View>
-        </View>
-
-        {/* Hide places from friends */}
-        <Text style={styles.sectionHeader}>HIDE PLACES FROM FRIENDS</Text>
-        <View style={styles.panelNoPadding}>
-          {PLACES.map((place, index) => (
-            <View
-              key={place}
-              style={[styles.row, styles.placeRow, index > 0 && styles.placeRowBorder]}
-            >
-              <Text style={[styles.rowTitle, styles.placeName]}>{place}</Text>
-              <Switch
-                value={hiddenPlaces[place] ?? false}
-                onValueChange={() => toggleHiddenPlace(place)}
-                trackColor={{ false: '#7A7A85', true: colors.spotifyGreen }}
-                accessibilityLabel={`Hide ${place} from friends`}
-              />
-            </View>
-          ))}
         </View>
 
         <View style={styles.logoutSection}>
@@ -270,11 +290,15 @@ const styles = StyleSheet.create({
   spotifyRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 4,
   },
   spotifyNote: {
     flex: 1,
     marginRight: 12,
+  },
+  spotifyErrorText: {
+    color: colors.error,
+    fontSize: 13,
+    marginTop: 10,
   },
   lightButton: {
     backgroundColor: '#E6E6E6',
@@ -312,7 +336,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   statusText: {
-    color: colors.error,
+    color: '#2B2D33',
     fontSize: 13,
     paddingHorizontal: 14,
     paddingBottom: 10,
@@ -344,18 +368,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#2B2D33',
     marginTop: 10,
-  },
-  placeRow: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-  },
-  placeRowBorder: {
-    borderTopWidth: 1,
-    borderTopColor: SELECTED_COLOR,
-  },
-  placeName: {
-    flex: 1,
-    marginRight: 12,
   },
   logoutSection: {
     paddingTop: 24,

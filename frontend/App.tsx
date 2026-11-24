@@ -1,41 +1,23 @@
 import { useCallback, useEffect, useRef, useState, type ComponentProps } from 'react';
-
 import { ActivityIndicator, Alert, AppState, StyleSheet, Text, View } from 'react-native';
-
 import { StatusBar } from 'expo-status-bar';
-
 import { NavigationContainer } from '@react-navigation/native';
-
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-
 import Constants from 'expo-constants';
-
 import * as Location from 'expo-location';
-
 import { colors } from './src/theme';
-
 import ActionButton from './src/components/ActionButton';
 import LocationAvailabilityAlert from './src/components/LocationAvailabilityAlert';
-
 import LoginScreen from './src/screens/LoginScreen';
-
 import SpotifyConnectScreen from './src/screens/SpotifyConnectScreen';
-
 import LocationPermissionScreen from './src/screens/LocationPermissionScreen';
-
 import MapScreen from './src/screens/MapScreen';
-
 import RouteScreen from './src/screens/RouteScreen';
-
 import FriendScreen from './src/screens/FriendScreen';
-
 import PrivacyScreen from './src/screens/PrivacyScreen';
 import FriendMapScreen from './src/screens/FriendMapScreen';
-
 import {
   getCurrentLocation,
   startTracking,
@@ -54,9 +36,12 @@ import {
   type PrivacySettings,
   type PrivacySettingsUpdate,
 } from './src/services/PrivacySettingsService';
-
 import { getSupabaseSession } from './src/services/SupabaseAuthService';
-import { connectSpotifyAccount, type SpotifyConnection } from './src/services/SpotifyAuthService';
+import {
+  connectSpotifyAccount,
+  disconnectSpotifyAccount,
+  type SpotifyConnection,
+} from './src/services/SpotifyAuthService';
 import {
   SpotifyHistoryError,
   syncListeningHistory,
@@ -70,56 +55,36 @@ const Tab = createBottomTabNavigator();
 type IconName = ComponentProps<typeof MaterialCommunityIcons>['name'];
 
 const TAB_ICONS: Record<string, IconName> = {
-
   Map: 'map-marker',
-
   'On-The-Go': 'map-marker-path',
-
   Friends: 'account-group',
-
   Settings: 'cog',
-
   'GPS Test': 'crosshairs-gps',
-
 };
 
 type Step = 'login' | 'spotify' | 'location' | 'app';
 
 // GPS testing screen
-
 type GpsTestScreenProps = {
   trackingEnabled: boolean;
   onTrackingChange: (enabled: boolean) => Promise<void>;
 };
 
 function GpsTestScreen({ trackingEnabled, onTrackingChange }: GpsTestScreenProps) {
-
   const [gpsReading, setGpsReading] = useState<GPSReading | null>(null);
-
   const [gpsMessage, setGpsMessage] = useState('');
-
   const [readingCount, setReadingCount] = useState<number | null>(null);
 
   const testGPS = useCallback(async () => {
-
     setGpsMessage('Getting GPS location...');
-
     const reading = await getCurrentLocation();
-
     if (reading) {
-
       setGpsReading(reading);
-
       setGpsMessage('GPS location received!');
-
     } else {
-
       setGpsReading(null);
-
       setGpsMessage('Could not get GPS location.');
-
     }
-
   }, []);
 
   const handleTrackingChange = async () => {
@@ -134,77 +99,32 @@ function GpsTestScreen({ trackingEnabled, onTrackingChange }: GpsTestScreenProps
   };
 
   return (
-
     <View style={styles.appContainer}>
-
       <ActionButton label="Test GPS" onPress={testGPS} />
-
       <ActionButton
-        label={
-          trackingEnabled
-            ? 'Stop GPS Tracking'
-            : 'Start GPS Tracking'
-        }
+        label={trackingEnabled ? 'Stop GPS Tracking' : 'Start GPS Tracking'}
         onPress={handleTrackingChange}
       />
-
       <Text style={styles.statusText}>{gpsMessage}</Text>
-
       {readingCount !== null && (
-
-        <Text style={styles.readingText}>
-
-          Recorded GPS readings: {readingCount}
-
-        </Text>
-
+        <Text style={styles.readingText}>Recorded GPS readings: {readingCount}</Text>
       )}
-
       {gpsReading && (
-
         <View style={styles.readingContainer}>
-
+          <Text style={styles.readingText}>Latitude: {gpsReading.latitude}</Text>
+          <Text style={styles.readingText}>Longitude: {gpsReading.longitude}</Text>
           <Text style={styles.readingText}>
-
-            Latitude: {gpsReading.latitude}
-
-          </Text>
-
-          <Text style={styles.readingText}>
-
-            Longitude: {gpsReading.longitude}
-
-          </Text>
-
-          <Text style={styles.readingText}>
-
             Timestamp: {new Date(gpsReading.timestamp).toLocaleString()}
-
           </Text>
-
         </View>
-
       )}
-
     </View>
-
   );
-
 }
 
 export default function App() {
-
-  const [step, setStep] = useState<Step>(
-
-    SKIP_LOGIN_FOR_TESTING ? 'app' : 'login'
-
-  );
-
-  const [isCheckingSession, setIsCheckingSession] = useState(
-
-    !SKIP_LOGIN_FOR_TESTING
-
-  );
+  const [step, setStep] = useState<Step>(SKIP_LOGIN_FOR_TESTING ? 'app' : 'login');
+  const [isCheckingSession, setIsCheckingSession] = useState(!SKIP_LOGIN_FOR_TESTING);
   const [gpsOwnerId, setGpsOwnerId] = useState<string | null>(null);
   const [privacySettings, setPrivacySettings] = useState<PrivacySettings | null>(null);
   const [isPrivacySettingsLoading, setIsPrivacySettingsLoading] = useState(false);
@@ -214,6 +134,7 @@ export default function App() {
   const logoutRequested = useRef(false);
   const isLocationTrackingEnabled = privacySettings?.location_tracking_enabled;
   const [spotifyConnection, setSpotifyConnection] = useState<SpotifyConnection | null>(null);
+  const [spotifyDisplayName, setSpotifyDisplayName] = useState<string | null>(null);
   const [mapRefreshVersion, setMapRefreshVersion] = useState(0);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [needsSpotifyReconnect, setNeedsSpotifyReconnect] = useState(false);
@@ -304,28 +225,21 @@ export default function App() {
       setTrackingStatus(null);
     }
   }, [savePrivacySettings]);
+
   // Restore Supabase login session
-
   useEffect(() => {
-
     if (SKIP_LOGIN_FOR_TESTING) {
-
       return;
-
     }
 
     let isMounted = true;
 
     async function restoreSession() {
-
       try {
-
         const session = await getSupabaseSession();
 
         if (!isMounted) {
-
           return;
-
         }
 
         currentUserId.current = session?.user.id ?? null;
@@ -337,37 +251,24 @@ export default function App() {
               : 'spotify'
             : 'login'
         );
-
       } catch (error) {
-
         console.warn('Failed to restore Supabase session:', error);
 
         if (isMounted) {
-
           setStep('login');
-
         }
-
       } finally {
-
         if (isMounted) {
-
           setIsCheckingSession(false);
-
         }
-
       }
-
     }
 
     void restoreSession();
 
     return () => {
-
       isMounted = false;
-
     };
-
   }, []);
 
   // Screen navigation
@@ -397,11 +298,7 @@ export default function App() {
   }, [cleanupGPSTracking, clearSpotifySession]);
 
   const goToSpotify = useCallback(() => {
-    if (Constants.appOwnership === 'expo') {
-      setStep('location');
-    } else {
-      setStep('spotify');
-    }
+    setStep('spotify');
   }, []);
 
   const goToLocation = useCallback((connection: SpotifyConnection) => {
@@ -442,10 +339,17 @@ export default function App() {
   }, [rememberSpotifyConnection]);
 
   const goToApp = useCallback(() => {
-
     setStep('app');
-
   }, []);
+
+  // Settings → Disconnect: forget Spotify on this device, clear the token
+  // from memory, and go back to the Connect Spotify screen
+  const disconnectSpotify = useCallback(async () => {
+    await disconnectSpotifyAccount();
+    clearSpotifySession();
+    setSpotifyDisplayName(null);
+    setStep('spotify');
+  }, [clearSpotifySession]);
 
   useEffect(() => {
     if (step === 'login') {
@@ -490,222 +394,222 @@ export default function App() {
       cancelled = true;
     };
   }, [step, privacySettingsReloadKey]);
+
   // Stop GPS tracking when the Supabase user signs out
-useEffect(() => {
-  const {
-    data: { subscription },
-  } = supabase.auth.onAuthStateChange((event, session) => {
-    if (event === 'SIGNED_OUT') {
-      currentUserId.current = null;
-      clearSpotifySession();
-      if (logoutRequested.current) {
+  useEffect(() => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT') {
+        currentUserId.current = null;
+        clearSpotifySession();
+        if (logoutRequested.current) {
+          return;
+        }
+
+        Alert.alert(
+          'Session Expired',
+          'Your SpotiMaps session expired. Log in again to continue.',
+          [{ text: 'Log In' }],
+        );
+        setStep('login');
+        void cleanupGPSTracking()
+          .catch((error) => {
+            console.error('Failed to clean up GPS after sign-out:', error);
+          });
         return;
       }
 
-      Alert.alert(
-        'Session Expired',
-        'Your SpotiMaps session expired. Log in again to continue.',
-        [{ text: 'Log In' }],
-      );
-      setStep('login');
-      void cleanupGPSTracking()
-        .catch((error) => {
-          console.error('Failed to clean up GPS after sign-out:', error);
+      const nextUserId = session?.user.id;
+      if (nextUserId && currentUserId.current && nextUserId !== currentUserId.current) {
+        // Switching SpotiMaps accounts must never reuse the previous Spotify token.
+        clearSpotifySession();
+        currentUserId.current = nextUserId;
+        const version = sessionVersion.current;
+        setGpsOwnerId(null);
+        setStep('login');
+        void cleanupGPSTracking().then(() => {
+          if (version === sessionVersion.current && currentUserId.current === nextUserId) {
+            setStep(Constants.appOwnership === 'expo' ? 'location' : 'spotify');
+          }
+        }).catch((error) => {
+          console.error('Failed to clean up GPS after account change:', error);
         });
+      } else if (nextUserId) {
+        currentUserId.current = nextUserId;
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [cleanupGPSTracking, clearSpotifySession]);
+
+  // Identify the Supabase user before starting automatic GPS tracking
+  useEffect(() => {
+    if (step !== 'app') {
+      setGpsOwnerId(null);
       return;
     }
 
-    const nextUserId = session?.user.id;
-    if (nextUserId && currentUserId.current && nextUserId !== currentUserId.current) {
-      // Switching SpotiMaps accounts must never reuse the previous Spotify token.
-      clearSpotifySession();
-      currentUserId.current = nextUserId;
-      const version = sessionVersion.current;
-      setGpsOwnerId(null);
-      setStep('login');
-      void cleanupGPSTracking().then(() => {
-        if (version === sessionVersion.current && currentUserId.current === nextUserId) {
-          setStep(Constants.appOwnership === 'expo' ? 'location' : 'spotify');
+    let cancelled = false;
+
+    const identifyGPSOwner = async () => {
+      try {
+        const {
+          data: { user },
+          error,
+        } = await supabase.auth.getUser();
+
+        if (cancelled) return;
+
+        if (error || !user) {
+          console.warn('Cannot start GPS tracking without a logged-in user.');
+          setGpsOwnerId(null);
+          return;
         }
-      }).catch((error) => {
-        console.error('Failed to clean up GPS after account change:', error);
-      });
-    } else if (nextUserId) {
-      currentUserId.current = nextUserId;
-    }
-  });
 
-  return () => {
-    subscription.unsubscribe();
-  };
-}, [cleanupGPSTracking, clearSpotifySession]);
+        if (cancelled) return;
 
-  // Identify the Supabase user before starting automatic GPS tracking
-useEffect(() => {
-  if (step !== 'app') {
-    setGpsOwnerId(null);
-    return;
-  }
+        await setGPSOwner(user.id);
 
-  let cancelled = false;
+        if (cancelled) return;
 
-  const identifyGPSOwner = async () => {
-    try {
-      const {
-        data: { user },
-        error,
-      } = await supabase.auth.getUser();
+        currentUserId.current = user.id;
+        setGpsOwnerId(user.id);
+        console.log('GPS owner identified successfully.');
+      } catch (error) {
+        console.error('Failed to identify GPS owner:', error);
 
-      if (cancelled) return;
-
-      if (error || !user) {
-        console.warn('Cannot start GPS tracking without a logged-in user.');
-        setGpsOwnerId(null);
-        return;
+        if (!cancelled) {
+          setGpsOwnerId(null);
+        }
       }
+    };
 
-      if (cancelled) return;
+    void identifyGPSOwner();
 
-      await setGPSOwner(user.id);
+    return () => {
+      cancelled = true;
+    };
+  }, [step]);
 
-      if (cancelled) return;
-
-      currentUserId.current = user.id;
-      setGpsOwnerId(user.id);
-      console.log('GPS owner identified successfully.');
-    } catch (error) {
-      console.error('Failed to identify GPS owner:', error);
-
-      if (!cancelled) {
-        setGpsOwnerId(null);
-      }
+  // Automatically start GPS tracking based on location permissions
+  useEffect(() => {
+    if (
+      step !== 'app' ||
+      !gpsOwnerId ||
+      isLocationTrackingEnabled === undefined
+    ) {
+      return;
     }
-  };
 
-  void identifyGPSOwner();
+    let cancelled = false;
 
-  return () => {
-    cancelled = true;
-  };
-}, [step]);
+    const startAutomaticTracking = async () => {
+      try {
+        // If tracking is disabled, stop everything
+        if (!isLocationTrackingEnabled) {
+          stopTracking();
+          await stopBackgroundTracking();
 
+          if (!cancelled) {
+            setTrackingStatus(null);
+          }
 
-// Automatically start GPS tracking based on location permissions
-useEffect(() => {
-  if (
-    step !== 'app' ||
-    !gpsOwnerId ||
-    isLocationTrackingEnabled === undefined
-  ) {
-    return;
-  }
+          return;
+        }
 
-  let cancelled = false;
+        // Check both foreground and background permissions
+        const foreground = await Location.getForegroundPermissionsAsync();
 
-  const startAutomaticTracking = async () => {
-    try {
-      // If tracking is disabled, stop everything
-      if (!isLocationTrackingEnabled) {
+        const background =
+          Constants.appOwnership !== 'expo'
+            ? await Location.getBackgroundPermissionsAsync()
+            : null;
+
+        if (cancelled) return;
+
+        // CASE 1: Both permissions granted (Always)
+        if (foreground.granted && background?.granted) {
+          // Stop foreground tracking before starting background tracking
+          stopTracking();
+
+          const alreadyTracking = await isBackgroundTracking();
+
+          if (cancelled) return;
+
+          const started = alreadyTracking
+            ? true
+            : await startBackgroundTracking();
+
+          if (cancelled) return;
+
+          if (started) {
+            setTrackingStatus(null);
+            console.log('Automatic background GPS tracking started.');
+          } else {
+            setTrackingStatus('Could not start background GPS tracking.');
+            console.warn('Automatic background GPS tracking could not start.');
+          }
+
+          return;
+        }
+
+        // CASE 2: Only foreground permission granted (While Using)
+        if (foreground.granted) {
+          // Stop background tracking before starting foreground tracking
+          await stopBackgroundTracking();
+
+          if (cancelled) return;
+
+          const started = await startTracking(gpsOwnerId);
+
+          if (cancelled) {
+            if (started) stopTracking();
+            return;
+          }
+
+          if (started) {
+            setTrackingStatus(null);
+            console.log('Automatic foreground GPS tracking started.');
+          } else {
+            setTrackingStatus('Could not start foreground GPS tracking.');
+            console.warn('Automatic foreground GPS tracking could not start.');
+          }
+
+          return;
+        }
+
+        // CASE 3: No location permission
         stopTracking();
         await stopBackgroundTracking();
 
         if (!cancelled) {
-          setTrackingStatus(null);
+          setTrackingStatus('Location permission is not granted.');
+          console.warn('GPS tracking could not start: no location permission.');
         }
+      } catch (error) {
+        console.warn('Automatic GPS tracking failed:', error);
 
-        return;
+        if (!cancelled) {
+          setTrackingStatus(
+            error instanceof Error
+              ? error.message
+              : 'Failed to start GPS tracking.'
+          );
+        }
       }
+    };
 
-      // Check both foreground and background permissions
-      const foreground = await Location.getForegroundPermissionsAsync();
+    void startAutomaticTracking();
 
-      const background =
-        Constants.appOwnership !== 'expo'
-          ? await Location.getBackgroundPermissionsAsync()
-          : null;
-
-      if (cancelled) return;
-
-      // CASE 1: Both permissions granted (Always)
-      if (foreground.granted && background?.granted) {
-        // Stop foreground tracking before starting background tracking
-        stopTracking();
-
-        const alreadyTracking = await isBackgroundTracking();
-
-        if (cancelled) return;
-
-        const started = alreadyTracking
-          ? true
-          : await startBackgroundTracking();
-
-        if (cancelled) return;
-
-        if (started) {
-          setTrackingStatus(null);
-          console.log('Automatic background GPS tracking started.');
-        } else {
-          setTrackingStatus('Could not start background GPS tracking.');
-          console.warn('Automatic background GPS tracking could not start.');
-        }
-
-        return;
-      }
-
-      // CASE 2: Only foreground permission granted (While Using)
-      if (foreground.granted) {
-        // Stop background tracking before starting foreground tracking
-        await stopBackgroundTracking();
-
-        if (cancelled) return;
-
-        const started = await startTracking(gpsOwnerId);
-
-        if (cancelled) {
-          if (started) stopTracking();
-          return;
-        }
-
-        if (started) {
-          setTrackingStatus(null);
-          console.log('Automatic foreground GPS tracking started.');
-        } else {
-          setTrackingStatus('Could not start foreground GPS tracking.');
-          console.warn('Automatic foreground GPS tracking could not start.');
-        }
-
-        return;
-      }
-
-      // CASE 3: No location permission
+    return () => {
+      cancelled = true;
       stopTracking();
-      await stopBackgroundTracking();
+    };
+  }, [step, gpsOwnerId, isLocationTrackingEnabled]);
 
-      if (!cancelled) {
-        setTrackingStatus('Location permission is not granted.');
-        console.warn('GPS tracking could not start: no location permission.');
-      }
-
-    } catch (error) {
-      console.warn('Automatic GPS tracking failed:', error);
-
-      if (!cancelled) {
-        setTrackingStatus(
-          error instanceof Error
-            ? error.message
-            : 'Failed to start GPS tracking.'
-        );
-      }
-    }
-  };
-
-  void startAutomaticTracking();
-
-  return () => {
-    cancelled = true;
-    stopTracking();
-  };
-}, [step, gpsOwnerId, isLocationTrackingEnabled]);
   // Upload GPS, ingest Spotify plays, then ask the map to retrieve matched data.
   useEffect(() => {
     if (step !== 'app' || !gpsOwnerId) {
@@ -829,113 +733,50 @@ useEffect(() => {
   }, [step, gpsOwnerId]);
 
   // Loading screen
-
   if (isCheckingSession) {
-
     return (
-
       <SafeAreaProvider>
-
         <StatusBar style="dark" />
-
         <View style={styles.loadingContainer}>
-
-          <ActivityIndicator
-
-            size="large"
-
-            color={colors.spotifyGreen}
-
-          />
-
-          <Text style={styles.loadingText}>
-
-            Loading your session...
-
-          </Text>
-
+          <ActivityIndicator size="large" color={colors.spotifyGreen} />
+          <Text style={styles.loadingText}>Loading your session...</Text>
         </View>
-
       </SafeAreaProvider>
-
     );
-
   }
 
   return (
-
     <SafeAreaProvider>
-
       <StatusBar style="dark" />
       <LocationAvailabilityAlert enabled={step === 'app'} />
 
       {/* Login */}
-
-      {step === 'login' && (
-
-        <LoginScreen onLogin={goToSpotify} />
-
-      )}
+      {step === 'login' && <LoginScreen onLogin={goToSpotify} />}
 
       {/* Spotify authentication */}
-
       {step === 'spotify' && (
-
-        <SpotifyConnectScreen
-        onConnected={goToLocation}
-        onLogout={goToLogin}
-        />
-
+        <SpotifyConnectScreen onConnected={goToLocation} onLogout={goToLogin} />
       )}
 
       {/* Location permissions */}
-
-      {step === 'location' && (
-
-        <LocationPermissionScreen onDone={goToApp} />
-
-      )}
+      {step === 'location' && <LocationPermissionScreen onDone={goToApp} />}
 
       {/* Main app */}
-
       {step === 'app' && (
-
         <NavigationContainer>
-
           <Tab.Navigator
-
             screenOptions={({ route }) => ({
-
               headerShown: false,
-
               tabBarStyle: {
-
                 backgroundColor: colors.sage,
-
               },
-
               tabBarActiveTintColor: colors.text,
-
               tabBarInactiveTintColor: colors.textMuted,
-
               tabBarIcon: ({ color, size }) => (
-
-                <MaterialCommunityIcons
-
-                  name={TAB_ICONS[route.name]}
-
-                  color={color}
-
-                  size={size}
-
-                />
-
+                <MaterialCommunityIcons name={TAB_ICONS[route.name]} color={color} size={size} />
               ),
-
             })}
-
           >
-
             <Tab.Screen name="Map">
               {() => (
                 <MapScreen
@@ -960,13 +801,7 @@ useEffect(() => {
               )}
             </Tab.Screen>
 
-            <Tab.Screen
-
-              name="Friends"
-
-              component={FriendScreen}
-
-            />
+            <Tab.Screen name="Friends" component={FriendScreen} />
 
             <Tab.Screen name="Settings">
               {() => (
@@ -975,12 +810,16 @@ useEffect(() => {
                   isSettingsLoading={isPrivacySettingsLoading}
                   settingsError={privacySettingsError}
                   trackingStatus={trackingStatus}
+                  spotifyDisplayName={spotifyDisplayName}
+                  spotifyConnected={spotifyConnection !== null}
+                  onDisconnectSpotify={disconnectSpotify}
                   onSave={savePrivacySettings}
                   onRetry={() => setPrivacySettingsReloadKey((key) => key + 1)}
                   onLogout={goToLogin}
                 />
               )}
             </Tab.Screen>
+
             <Tab.Screen name="GPS Test">
               {() => (
                 <GpsTestScreen
@@ -989,85 +828,45 @@ useEffect(() => {
                 />
               )}
             </Tab.Screen>
-
           </Tab.Navigator>
-
         </NavigationContainer>
-
       )}
-
     </SafeAreaProvider>
-
   );
-
 }
 
 const styles = StyleSheet.create({
-
   loadingContainer: {
-
     flex: 1,
-
     alignItems: 'center',
-
     justifyContent: 'center',
-
     backgroundColor: colors.cream,
-
   },
-
   loadingText: {
-
     marginTop: 12,
-
     fontSize: 16,
-
     color: colors.text,
-
   },
-
   appContainer: {
-
     flex: 1,
-
     alignItems: 'center',
-
     justifyContent: 'center',
-
     backgroundColor: colors.cream,
-
     paddingHorizontal: 24,
-
     gap: 16,
-
   },
-
   statusText: {
-
     fontSize: 16,
-
     color: colors.text,
-
     textAlign: 'center',
-
   },
-
   readingContainer: {
-
     marginTop: 8,
-
     alignItems: 'center',
-
   },
-
   readingText: {
-
     color: colors.text,
-
     fontSize: 15,
-
     marginBottom: 4,
-
   },
-
 });
