@@ -3,11 +3,11 @@ import { ActivityIndicator, LayoutAnimation, Pressable, StyleSheet, Text, View }
 import MapView, { Marker, type Region } from 'react-native-maps';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { colors, getGenreColor, getReadableTextColor } from '../theme';
+import { colors, getGenreColor, getGenreFamily, getReadableTextColor } from '../theme';
 import { supabase } from '../lib/supabase';
 import type { MapPlace } from '../data/mockData';
 import { fetchMapPlaces } from '../services/MapDataService';
-import { getMarkerGenreFamilies, getTopGenre, getTotalPlays } from '../utils/placeStats';
+import { getTopGenre, getTotalPlays } from '../utils/placeStats';
 import SongCardScreen from './SongCardScreen';
 import MapShareModal from '../components/MapShareModal';
 
@@ -17,7 +17,18 @@ const UW_REGION: Region = {
   latitudeDelta: 0.012,
   longitudeDelta: 0.012,
 };
-
+function getListenedGenreFamilies(places: MapPlace[]): string[] {
+  const playsByGenre = new Map<string, number>();
+  places.forEach((place) => {
+    place.songs.forEach((song) => {
+      const family = getGenreFamily(song.genre);
+      playsByGenre.set(family, (playsByGenre.get(family) ?? 0) + song.plays);
+    });
+  });
+  return [...playsByGenre.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([genre]) => genre);
+}
 export default function MapScreen() {
   const mapRef = useRef<MapView>(null);
   const regionRef = useRef<Region>(UW_REGION);
@@ -108,7 +119,7 @@ export default function MapScreen() {
     );
   };
 
-  const presentGenres = getMarkerGenreFamilies(places);
+  const presentGenres = getListenedGenreFamilies(places);
   const isEmpty = !isLoading && !hasLoadError && places.length === 0;
 
   return (
