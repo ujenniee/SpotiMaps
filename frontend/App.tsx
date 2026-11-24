@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ComponentProps } from 'react';
 
-import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, AppState, StyleSheet, Text, View } from 'react-native';
 
 import { StatusBar } from 'expo-status-bar';
 
@@ -56,6 +56,8 @@ import {
 } from './src/services/PrivacySettingsService';
 
 import { getSupabaseSession } from './src/services/SupabaseAuthService';
+import { connectSpotifyAccount, type SpotifyConnection } from './src/services/SpotifyAuthService';
+import { SpotifyHistoryError, syncListeningHistory } from './src/services/SpotifyHistoryService';
 import { supabase } from './src/lib/supabase';
 
 const SKIP_LOGIN_FOR_TESTING = false;
@@ -208,6 +210,51 @@ export default function App() {
   const [trackingStatus, setTrackingStatus] = useState<string | null>(null);
   const logoutRequested = useRef(false);
   const isLocationTrackingEnabled = privacySettings?.location_tracking_enabled;
+  const [spotifyConnection, setSpotifyConnection] = useState<SpotifyConnection | null>(null);
+  const [mapRefreshVersion, setMapRefreshVersion] = useState(0);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [needsSpotifyReconnect, setNeedsSpotifyReconnect] = useState(false);
+  const [isReconnectingSpotify, setIsReconnectingSpotify] = useState(false);
+  const spotifyConnectionRef = useRef<SpotifyConnection | null>(null);
+  const currentUserId = useRef<string | null>(null);
+  const sessionVersion = useRef(0);
+  const reconnectAttempt = useRef(0);
+  const reconnecting = useRef(false);
+  const spotifyRetryAt = useRef(0);
+  const spotifyProblem = useRef<string | null>(null);
+  // These survive effect restarts so an old request cannot overlap a new one.
+  const syncInFlight = useRef(false);
+  const syncRequested = useRef(false);
+  const requestSync = useRef<(() => void) | null>(null);
+
+  const clearSpotifySession = useCallback(() => {
+    sessionVersion.current += 1;
+    reconnectAttempt.current += 1;
+    reconnecting.current = false;
+    spotifyConnectionRef.current = null;
+    spotifyRetryAt.current = 0;
+    spotifyProblem.current = null;
+    syncRequested.current = false;
+    setSpotifyConnection(null);
+    setNeedsSpotifyReconnect(false);
+    setIsReconnectingSpotify(false);
+    setSyncError(null);
+  }, []);
+
+  const rememberSpotifyConnection = useCallback((connection: SpotifyConnection) => {
+    spotifyConnectionRef.current = connection;
+    spotifyProblem.current = null;
+    setSpotifyConnection(connection);
+    setNeedsSpotifyReconnect(false);
+    setSyncError(null);
+  }, []);
+
+  useEffect(() => () => {
+    sessionVersion.current += 1;
+    reconnectAttempt.current += 1;
+    spotifyConnectionRef.current = null;
+    requestSync.current = null;
+  }, []);
 
   const cleanupGPSTracking = useCallback(async () => {
     // Stop foreground tracking
@@ -278,6 +325,8 @@ export default function App() {
 
         }
 
+        currentUserId.current = session?.user.id ?? null;
+
         setStep(
           session
             ? Constants.appOwnership === 'expo'
@@ -322,6 +371,7 @@ export default function App() {
   const goToLogin = useCallback(async () => {
     try {
       logoutRequested.current = true;
+      clearSpotifySession();
       const { error } = await supabase.auth.signOut();
       if (error) {
         throw error;
@@ -331,12 +381,17 @@ export default function App() {
       setStep('login');
     } catch (error) {
       logoutRequested.current = false;
+      if (currentUserId.current && Constants.appOwnership !== 'expo') {
+        spotifyProblem.current = 'Sign-out failed. Reconnect Spotify to resume song imports.';
+        setSyncError(spotifyProblem.current);
+        setNeedsSpotifyReconnect(true);
+      }
       console.error('Failed to sign out or clean up GPS tracking:', error);
       throw error;
     } finally {
       logoutRequested.current = false;
     }
-  }, [cleanupGPSTracking]);
+  }, [cleanupGPSTracking, clearSpotifySession]);
 
   const goToSpotify = useCallback(() => {
     if (Constants.appOwnership === 'expo') {
@@ -346,11 +401,42 @@ export default function App() {
     }
   }, []);
 
-  const goToLocation = useCallback(() => {
-
+  const goToLocation = useCallback((connection: SpotifyConnection) => {
+    if (logoutRequested.current
+      || (currentUserId.current && currentUserId.current !== connection.userId)) return;
+    currentUserId.current = connection.userId;
+    rememberSpotifyConnection(connection);
     setStep('location');
+  }, [rememberSpotifyConnection]);
 
-  }, []);
+  const reconnectSpotify = useCallback(async () => {
+    const ownerId = currentUserId.current;
+    if (!ownerId || reconnecting.current || logoutRequested.current) return;
+
+    const version = sessionVersion.current;
+    const attempt = ++reconnectAttempt.current;
+    const isCurrent = () => version === sessionVersion.current
+      && attempt === reconnectAttempt.current && currentUserId.current === ownerId
+      && !logoutRequested.current;
+    reconnecting.current = true;
+    setIsReconnectingSpotify(true);
+    try {
+      const connection = await connectSpotifyAccount();
+      if (!isCurrent() || !connection || connection.userId !== ownerId) return;
+      rememberSpotifyConnection(connection);
+      requestSync.current?.();
+    } catch (error) {
+      if (isCurrent()) {
+        spotifyProblem.current = error instanceof Error ? error.message : 'Could not reconnect Spotify.';
+        setSyncError(spotifyProblem.current);
+      }
+    } finally {
+      if (isCurrent()) {
+        reconnecting.current = false;
+        setIsReconnectingSpotify(false);
+      }
+    }
+  }, [rememberSpotifyConnection]);
 
   const goToApp = useCallback(() => {
 
@@ -405,8 +491,10 @@ export default function App() {
 useEffect(() => {
   const {
     data: { subscription },
-  } = supabase.auth.onAuthStateChange((event) => {
+  } = supabase.auth.onAuthStateChange((event, session) => {
     if (event === 'SIGNED_OUT') {
+      currentUserId.current = null;
+      clearSpotifySession();
       if (logoutRequested.current) {
         return;
       }
@@ -416,20 +504,38 @@ useEffect(() => {
         'Your SpotiMaps session expired. Log in again to continue.',
         [{ text: 'Log In' }],
       );
+      setStep('login');
       void cleanupGPSTracking()
-        .then(() => {
-          setStep('login');
-        })
         .catch((error) => {
           console.error('Failed to clean up GPS after sign-out:', error);
         });
+      return;
+    }
+
+    const nextUserId = session?.user.id;
+    if (nextUserId && currentUserId.current && nextUserId !== currentUserId.current) {
+      // Switching SpotiMaps accounts must never reuse the previous Spotify token.
+      clearSpotifySession();
+      currentUserId.current = nextUserId;
+      const version = sessionVersion.current;
+      setGpsOwnerId(null);
+      setStep('login');
+      void cleanupGPSTracking().then(() => {
+        if (version === sessionVersion.current && currentUserId.current === nextUserId) {
+          setStep(Constants.appOwnership === 'expo' ? 'location' : 'spotify');
+        }
+      }).catch((error) => {
+        console.error('Failed to clean up GPS after account change:', error);
+      });
+    } else if (nextUserId) {
+      currentUserId.current = nextUserId;
     }
   });
 
   return () => {
     subscription.unsubscribe();
   };
-}, [cleanupGPSTracking]);
+}, [cleanupGPSTracking, clearSpotifySession]);
 
   // Identify the Supabase user before starting automatic GPS tracking
 useEffect(() => {
@@ -461,6 +567,7 @@ useEffect(() => {
 
       if (cancelled) return;
 
+      currentUserId.current = user.id;
       setGpsOwnerId(user.id);
       console.log('GPS owner identified successfully.');
     } catch (error) {
@@ -596,37 +703,125 @@ useEffect(() => {
     stopTracking();
   };
 }, [step, gpsOwnerId, isLocationTrackingEnabled]);
-  // Automatically upload saved GPS readings to Supabase
+  // Upload GPS, ingest Spotify plays, then ask the map to retrieve matched data.
   useEffect(() => {
     if (step !== 'app' || !gpsOwnerId) {
       return;
     }
 
     let cancelled = false;
+    let isForeground = AppState.currentState === 'active';
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+    const isCurrent = () => !cancelled && !logoutRequested.current
+      && currentUserId.current === gpsOwnerId;
 
-    const syncGPS = async () => {
-      if (cancelled) {
+    const sync = () => {
+      if (!isCurrent() || !isForeground) return;
+      if (syncInFlight.current) {
+        syncRequested.current = true;
         return;
       }
+      syncRequested.current = false;
+      syncInFlight.current = true;
+      const version = sessionVersion.current;
+      const canRun = () => isCurrent() && isForeground && version === sessionVersion.current;
 
-      try {
-        await syncPendingGPSReadings(supabase);
-      } catch (error) {
-        console.error('Automatic GPS sync failed:', error);
-      }
+      const run = async () => {
+        let gpsError: string | null = null;
+        try {
+          await syncPendingGPSReadings(supabase);
+        } catch (error) {
+          gpsError = error instanceof Error ? error.message : 'Could not upload GPS readings.';
+        }
+        if (!canRun()) return;
+
+        // Check actual authentication as well as our locally remembered owner.
+        const { data: auth, error: authError } = await supabase.auth.getUser();
+        if (!canRun() || authError || auth.user?.id !== gpsOwnerId) return;
+        const connection = spotifyConnectionRef.current;
+        if (connection?.userId === gpsOwnerId && Date.now() >= spotifyRetryAt.current) {
+          if (connection.expiresAt !== null && connection.expiresAt <= Date.now()) {
+            spotifyConnectionRef.current = null;
+            setSpotifyConnection(null);
+            setNeedsSpotifyReconnect(true);
+            spotifyProblem.current = 'Spotify authorization expired. Reconnect Spotify to import new songs.';
+          } else {
+            try {
+              const result = await syncListeningHistory(
+                supabase, connection.accessToken, undefined, connection.userId,
+              );
+              if (!canRun()) return;
+              if (spotifyConnectionRef.current === connection) {
+                spotifyRetryAt.current = 0;
+                spotifyProblem.current = result.matchingError
+                  ? `Songs saved, but location matching needs retry: ${result.matchingError}` : null;
+              }
+            } catch (error) {
+              if (!canRun()) return;
+              if (spotifyConnectionRef.current === connection) {
+                spotifyProblem.current = error instanceof Error ? error.message : 'Could not import Spotify songs.';
+                if (error instanceof SpotifyHistoryError) {
+                  if (error.status === 401 || error.status === 403) {
+                    spotifyConnectionRef.current = null;
+                    setSpotifyConnection(null);
+                    setNeedsSpotifyReconnect(true);
+                  } else if (error.status === 429) {
+                    spotifyRetryAt.current = Date.now() + (error.retryAfterSeconds ?? 30) * 1000;
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        // A Spotify error does not prevent showing songs already saved in Supabase.
+        if (canRun()) {
+          setSyncError(gpsError ?? spotifyProblem.current);
+          setMapRefreshVersion((value) => value + 1);
+        }
+      };
+
+      void run().catch((error) => {
+        if (canRun()) {
+          setSyncError(error instanceof Error ? error.message : 'Could not synchronize listening history.');
+          setMapRefreshVersion((value) => value + 1);
+        }
+      }).finally(() => {
+        syncInFlight.current = false;
+        if (syncRequested.current) {
+          syncRequested.current = false;
+          requestSync.current?.();
+        }
+      });
     };
 
-    // Upload saved readings when the user enters the app
-    void syncGPS();
-
-    // Check for new GPS readings every 30 seconds
-    const intervalId = setInterval(() => {
-      void syncGPS();
-    }, 30000);
+    const stopTimer = () => {
+      if (intervalId !== null) clearInterval(intervalId);
+      intervalId = null;
+    };
+    const startTimer = () => {
+      stopTimer();
+      sync();
+      intervalId = setInterval(sync, 30000);
+    };
+    requestSync.current = sync;
+    if (isForeground) startTimer();
+    const subscription = AppState.addEventListener('change', (state) => {
+      const wasForeground = isForeground;
+      isForeground = state === 'active';
+      if (isForeground && !wasForeground) startTimer();
+      else if (!isForeground) {
+        stopTimer();
+        syncRequested.current = false;
+      }
+    });
 
     return () => {
       cancelled = true;
-      clearInterval(intervalId);
+      stopTimer();
+      subscription.remove();
+      syncRequested.current = false;
+      if (requestSync.current === sync) requestSync.current = null;
     };
   }, [step, gpsOwnerId]);
 
@@ -738,13 +933,17 @@ useEffect(() => {
 
           >
 
-            <Tab.Screen
-
-              name="Map"
-
-              component={MapScreen}
-
-            />
+            <Tab.Screen name="Map">
+              {() => (
+                <MapScreen
+                  refreshVersion={mapRefreshVersion}
+                  syncError={syncError}
+                  onReconnectSpotify={needsSpotifyReconnect && !spotifyConnection
+                    ? () => { void reconnectSpotify(); } : undefined}
+                  isReconnectingSpotify={isReconnectingSpotify}
+                />
+              )}
+            </Tab.Screen>
 
             <Tab.Screen name="On-The-Go">
               {() => (

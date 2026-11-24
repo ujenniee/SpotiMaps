@@ -17,9 +17,27 @@ const UW_REGION: Region = {
   longitudeDelta: 0.012,
 };
 
-export default function MapScreen() {
+type Props = {
+  refreshVersion?: number;
+  syncError?: string | null;
+  onReconnectSpotify?: () => void;
+  isReconnectingSpotify?: boolean;
+};
+
+export default function MapScreen({
+  refreshVersion = 0,
+  syncError = null,
+  onReconnectSpotify,
+  isReconnectingSpotify = false,
+}: Props) {
   const mapRef = useRef<MapView>(null);
   const regionRef = useRef<Region>(UW_REGION);
+  const isMountedRef = useRef(false);
+  const isLoadingPlacesRef = useRef(false);
+  const pendingRefreshRef = useRef(false);
+  const mountVersionRef = useRef(0);
+  const hasSelectedInitialPlaceRef = useRef(false);
+  const hasFitInitialPlacesRef = useRef(false);
   const [places, setPlaces] = useState<MapPlace[]>([]);
   const [selectedPlace, setSelectedPlace] = useState<MapPlace | null>(null);
   const [isCardExpanded, setIsCardExpanded] = useState(true);
@@ -33,37 +51,61 @@ export default function MapScreen() {
   };
 
   useEffect(() => {
-    let isMounted = true;
-
-    async function loadPlaces() {
-      try {
-        const nextPlaces = await fetchMapPlaces(supabase);
-        if (isMounted) {
-          setPlaces(nextPlaces);
-          setSelectedPlace(nextPlaces[0] ?? null);
-        }
-      } catch (error) {
-        if (isMounted) {
-          setLoadError(error instanceof Error ? error.message : 'Could not load map data.');
-        }
-      } finally {
-        if (isMounted) {
-          setIsLoading(false);
-        }
-      }
-    }
-
-    void loadPlaces();
+    isMountedRef.current = true;
 
     return () => {
-      isMounted = false;
+      isMountedRef.current = false;
+      pendingRefreshRef.current = false;
+      mountVersionRef.current += 1;
     };
   }, []);
 
   useEffect(() => {
-    if (!isMapReady || isLoading || places.length === 0) {
+    pendingRefreshRef.current = true;
+    if (isLoadingPlacesRef.current) {
       return;
     }
+
+    async function loadPlaces() {
+      isLoadingPlacesRef.current = true;
+      // Coalesce refreshes that arrive during a request into one follow-up load.
+      while (isMountedRef.current && pendingRefreshRef.current) {
+        pendingRefreshRef.current = false;
+        const mountVersion = mountVersionRef.current;
+        try {
+          const nextPlaces = await fetchMapPlaces(supabase);
+          if (isMountedRef.current && mountVersion === mountVersionRef.current) {
+            const selectInitialPlace = !hasSelectedInitialPlaceRef.current && nextPlaces.length > 0;
+            if (selectInitialPlace) {
+              hasSelectedInitialPlaceRef.current = true;
+            }
+            setPlaces(nextPlaces);
+            setSelectedPlace((current) => selectInitialPlace
+              ? nextPlaces[0]
+              : nextPlaces.find((place) => place.id === current?.id) ?? null);
+            setLoadError(null);
+          }
+        } catch (error) {
+          if (isMountedRef.current && mountVersion === mountVersionRef.current) {
+            setLoadError(error instanceof Error ? error.message : 'Could not load map data.');
+          }
+        } finally {
+          if (isMountedRef.current && mountVersion === mountVersionRef.current) {
+            setIsLoading(false);
+          }
+        }
+      }
+      isLoadingPlacesRef.current = false;
+    }
+
+    void loadPlaces();
+  }, [refreshVersion]);
+
+  useEffect(() => {
+    if (hasFitInitialPlacesRef.current || !isMapReady || isLoading || places.length === 0) {
+      return;
+    }
+    hasFitInitialPlacesRef.current = true;
 
     const coordinates = places.map(({ latitude, longitude }) => ({ latitude, longitude }));
     const first = coordinates[0];
@@ -154,15 +196,27 @@ export default function MapScreen() {
         </View>
       </SafeAreaView>
 
-      {isLoading || loadError || places.length === 0 ? (
+      {isLoading || loadError || syncError || onReconnectSpotify || places.length === 0 ? (
         <View style={styles.statusBanner} accessibilityRole="summary">
           <Text style={styles.statusText}>
-            {isLoading
+            {syncError || loadError || (isLoading
               ? 'Loading your listening history…'
-              : loadError
-                ? loadError
-                : 'No matched listening data from the last 7 days. Save listening history and GPS samples to see places here.'}
+              : places.length === 0
+                ? 'No matched listening data from the last 7 days. Save listening history and GPS samples to see places here.'
+                : 'Reconnect Spotify to import your recent listening history.')}
           </Text>
+          {onReconnectSpotify ? (
+            <Pressable
+              onPress={onReconnectSpotify}
+              disabled={isReconnectingSpotify}
+              style={styles.reconnectButton}
+              accessibilityRole="button"
+            >
+              <Text style={styles.reconnectText}>
+                {isReconnectingSpotify ? 'Connecting…' : 'Reconnect Spotify'}
+              </Text>
+            </Pressable>
+          ) : null}
         </View>
       ) : null}
 
@@ -278,5 +332,17 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 13,
     textAlign: 'center',
+  },
+  reconnectButton: {
+    alignSelf: 'center',
+    marginTop: 8,
+    borderRadius: 6,
+    backgroundColor: colors.sage,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  reconnectText: {
+    color: colors.text,
+    fontSize: 13,
   },
 });
