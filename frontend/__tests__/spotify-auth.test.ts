@@ -3,6 +3,9 @@ import { supabase } from '../src/lib/supabase';
 
 const mockPromptAsync = jest.fn();
 
+jest.mock('@react-native-async-storage/async-storage', () =>
+  require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
+);
 jest.mock('expo-auth-session', () => ({
   AuthRequest: jest.fn().mockImplementation(() => ({
     codeVerifier: 'pkce-verifier',

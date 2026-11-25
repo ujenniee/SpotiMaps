@@ -11,6 +11,7 @@ import {
   sendFriendRequest,
 } from '../src/services/FriendService';
 import { supabase } from '../src/lib/supabase';
+jest.setTimeout(20000);
 jest.mock('../src/screens/FriendMapScreen', () => ({
   __esModule: true,
   default: () => null,

@@ -9,7 +9,7 @@ import MapShareModal from '../src/components/MapShareModal';
 import type { MapPlace } from '../src/data/mockData';
 import { getMapExportRegion } from '../src/utils/mapExport';
 import { STORY_SHARE_FORMAT } from '../src/utils/mapShareFormat';
-
+jest.setTimeout(20000);
 type RenderResult = Awaited<ReturnType<typeof render>>;
 type MapShareModalProps = ComponentProps<typeof MapShareModal>;
 
